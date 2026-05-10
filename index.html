@@ -708,7 +708,15 @@ function appendCRow(pi,ji,tbl){
 function addPart(pi){
   parts[pi].push({name:"",length:"",width:"",quantity:1,color:nc()});
   rebuildSec(pi);schedCalc();
-  setTimeout(()=>{const t=document.getElementById(`ct_${pi}`);if(t){const rows=t.querySelectorAll(".crow");const last=rows[rows.length-1];if(last)last.querySelector("input").focus();}},50);
+  // 새 행 이름 셀로 포커스 — 단, 이미 다른 셀(수량 등)이 포커스를 받은 경우 빼앗지 않음
+  setTimeout(()=>{
+    const t=document.getElementById(`ct_${pi}`);if(!t)return;
+    const rows=t.querySelectorAll(".crow");const last=rows[rows.length-1];if(!last)return;
+    const active=document.activeElement;
+    // 포커스가 이 섹션 내부에 있으면 이동하지 않음
+    if(active&&t.contains(active))return;
+    last.querySelector("input").focus();
+  },50);
 }
 function removePart(pi,ji){
   if(parts[pi].length<=1){toast("조각은 최소 1개 필요합니다");return;}
