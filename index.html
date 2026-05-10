@@ -413,12 +413,21 @@ body{font-family:var(--font);background:var(--bg);color:var(--tx);height:100vh;o
     <button class="zvbtn" onclick="fzoom(0.8)">−</button>
     <button class="zvbtn" onclick="fresetZoom()">⟳</button>
     <button class="zvbtn" id="lineModeBtn" onclick="toggleLineMode()" title="선 모드" style="font-size:11px;width:auto;padding:0 7px;gap:3px">☰ 선</button>
-    <button class="abtn sec" style="flex:0;padding:4px 11px;font-size:11px;margin-left:4px" onclick="cmo('fullMo')">✕ 닫기</button>
+    <button class="abtn sec" style="flex:0;padding:4px 11px;font-size:11px;margin-left:4px;white-space:nowrap;line-height:1.4;display:flex;align-items:center;gap:3px" onclick="cmo('fullMo')">✕ 닫기</button>
   </div>
   <canvas id="fullCv"></canvas>
 </div></div>
 
 <input type="file" id="fileInp" accept=".json" style="display:none" onchange="onFileLoad(event)">
+
+<!-- 요약 팝업 모달 -->
+<div class="mo" id="sumMo">
+<div class="mc" style="max-width:340px">
+  <div class="mct">📋 배치 요약<button class="mcl" onclick="cmo('sumMo')">✕</button></div>
+  <div id="sumC"></div>
+  <div class="mbs"><button class="mb_ s" onclick="cmo('sumMo')">닫기</button></div>
+</div></div>
+
 <div id="toast"></div>
 
 <script>
@@ -436,6 +445,7 @@ let panels=[],parts=[],results=[];
 let curFilm=0,cvS=1,cvX=0,cvY=0,fS=1,fX=0,fY=0,fF=0;
 let calcT=null,CU="",_cTgt={pi:-1,ji:-1};
 let lineMode=false;
+let _sumBox=null; // 요약 박스 캔버스 좌표 (클릭 감지용)
 
 /* === 초기화 === */
 window.addEventListener("DOMContentLoaded",()=>{
@@ -524,13 +534,62 @@ function renderPanelTbl(){
     row.append(nb,n,l,w,cb,del);tbl.appendChild(row);
   });
 }
-// Enter 키: 같은 행의 다음 열로 이동 (폭 마지막이면 다음 Film 행 이름으로)
+// Enter/Tab/화살표 키: 같은 행의 다음 열로 이동 (폭 마지막이면 다음 Film 행 이름으로)
 function panKey(e,pi,col){
-  if(e.key!=="Enter")return;
-  e.preventDefault();
   const colOrder=["name","length","width"];
-  const curIdx=colOrder.indexOf(col);
   const rows=document.querySelectorAll("#panelTbl .prow");
+  const curIdx=colOrder.indexOf(col);
+  // 방향키 처리
+  if(e.key==="ArrowRight"){
+    e.preventDefault();
+    if(curIdx<colOrder.length-1){
+      const inp=rows[pi].querySelector(`input[data-col="${colOrder[curIdx+1]}"]`);
+      if(inp){inp.focus();inp.select();}
+    }
+    return;
+  }
+  if(e.key==="ArrowLeft"){
+    e.preventDefault();
+    if(curIdx>0){
+      const inp=rows[pi].querySelector(`input[data-col="${colOrder[curIdx-1]}"]`);
+      if(inp){inp.focus();inp.select();}
+    }
+    return;
+  }
+  if(e.key==="ArrowDown"){
+    e.preventDefault();
+    if(pi<rows.length-1){
+      const inp=rows[pi+1].querySelector(`input[data-col="${col}"]`);
+      if(inp){inp.focus();inp.select();}
+    }
+    return;
+  }
+  if(e.key==="ArrowUp"){
+    e.preventDefault();
+    if(pi>0){
+      const inp=rows[pi-1].querySelector(`input[data-col="${col}"]`);
+      if(inp){inp.focus();inp.select();}
+    }
+    return;
+  }
+  const isEnter=e.key==="Enter",isTab=e.key==="Tab"&&!e.shiftKey;
+  if(!isEnter&&!isTab)return;
+  // Tab: 폭→다음 행 이름 (또는 마지막이면 조각 섹션)
+  if(isTab&&col==="width"){
+    e.preventDefault();
+    if(pi<rows.length-1){
+      const inp=rows[pi+1].querySelector('input[data-col="name"]');
+      if(inp){inp.focus();inp.select();}
+    } else {
+      setTimeout(()=>{
+        const s=document.getElementById(`cs_${pi}`);
+        if(s){const inp=s.querySelector("input.ci");if(inp){inp.focus();inp.select();}}
+      },80);
+    }
+    return;
+  }
+  if(!isEnter)return;
+  e.preventDefault();
   if(curIdx<colOrder.length-1){
     // 다음 열
     const inp=rows[pi].querySelector(`input[data-col="${colOrder[curIdx+1]}"]`);
@@ -651,14 +710,56 @@ function chkAddPart(pi,ji){
   const pt=parts[pi][ji];
   if(parseFloat(pt.length)>0&&parseFloat(pt.width)>0)addPart(pi);
 }
-// Enter 키: 같은 열의 다음 행으로 이동 (마지막 행이면 다음 열로)
+// Enter/Tab/화살표 키: 같은 열의 다음 행으로 이동 (마지막 행이면 다음 열로)
 function cutKey(e,pi,ji,col){
-  if(e.key!=="Enter")return;
-  e.preventDefault();
   const t=document.getElementById(`ct_${pi}`);if(!t)return;
   const rows=Array.from(t.querySelectorAll(".crow"));
   const colOrder=["name","length","width","quantity"];
   const curIdx=colOrder.indexOf(col);
+  // 방향키 처리
+  if(e.key==="ArrowDown"){
+    e.preventDefault();
+    if(ji<rows.length-1){
+      const inp=rows[ji+1].querySelector(`input[data-col="${col}"]`);
+      if(inp){inp.focus();inp.select();}
+    }
+    return;
+  }
+  if(e.key==="ArrowUp"){
+    e.preventDefault();
+    if(ji>0){
+      const inp=rows[ji-1].querySelector(`input[data-col="${col}"]`);
+      if(inp){inp.focus();inp.select();}
+    }
+    return;
+  }
+  if(e.key==="ArrowRight"){
+    e.preventDefault();
+    if(curIdx<colOrder.length-1){
+      const inp=rows[ji].querySelector(`input[data-col="${colOrder[curIdx+1]}"]`);
+      if(inp){inp.focus();inp.select();}
+    }
+    return;
+  }
+  if(e.key==="ArrowLeft"){
+    e.preventDefault();
+    if(curIdx>0){
+      const inp=rows[ji].querySelector(`input[data-col="${colOrder[curIdx-1]}"]`);
+      if(inp){inp.focus();inp.select();}
+    }
+    return;
+  }
+  const isEnter=e.key==="Enter",isTab=e.key==="Tab"&&!e.shiftKey;
+  if(!isEnter&&!isTab)return;
+  // Tab: 폭→수량 포커스 이동
+  if(isTab&&col==="width"){
+    e.preventDefault();
+    const inp=rows[ji].querySelector('input[data-col="quantity"]');
+    if(inp){inp.focus();inp.select();}
+    return;
+  }
+  if(!isEnter)return;
+  e.preventDefault();
   if(ji<rows.length-1){
     // 다음 행의 같은 열
     const inp=rows[ji+1].querySelector(`input[data-col="${col}"]`);
@@ -726,7 +827,19 @@ function initCanvas(){
   resizeCV();window.addEventListener("resize",()=>{resizeCV();drawCV();});
   let drag=null,pinch=null;
   cv.addEventListener("mousedown",e=>{drag={x:e.clientX,y:e.clientY};});
-  cv.addEventListener("mousemove",e=>{if(!drag)return;cvX+=e.clientX-drag.x;cvY+=e.clientY-drag.y;drag={x:e.clientX,y:e.clientY};drawCV();});
+  cv.addEventListener("mousemove",e=>{
+    if(!drag)return;cvX+=e.clientX-drag.x;cvY+=e.clientY-drag.y;drag={x:e.clientX,y:e.clientY};drawCV();
+    // cursor 힌트: 요약 박스 위
+    if(_sumBox){const r=cv.getBoundingClientRect();const mx=e.clientX-r.left,my=e.clientY-r.top;cv.style.cursor=(mx>=_sumBox.bx&&mx<=_sumBox.bx+_sumBox.bw2&&my>=_sumBox.by&&my<=_sumBox.by+_sumBox.bh2)?"pointer":"grabbing";}
+  });
+  cv.addEventListener("click",e=>{
+    if(!_sumBox||!results.length)return;
+    const r=cv.getBoundingClientRect();const mx=e.clientX-r.left,my=e.clientY-r.top;
+    if(mx>=_sumBox.bx&&mx<=_sumBox.bx+_sumBox.bw2&&my>=_sumBox.by&&my<=_sumBox.by+_sumBox.bh2)openSumPopup();
+  });
+  cv.addEventListener("mousemove",e=>{
+    if(_sumBox&&!drag){const r=cv.getBoundingClientRect();const mx=e.clientX-r.left,my=e.clientY-r.top;cv.style.cursor=(mx>=_sumBox.bx&&mx<=_sumBox.bx+_sumBox.bw2&&my>=_sumBox.by&&my<=_sumBox.by+_sumBox.bh2)?"pointer":"grab";}
+  });
   cv.addEventListener("mouseup",()=>drag=null);
   cv.addEventListener("wheel",e=>{e.preventDefault();cvS*=e.deltaY<0?1.1:.9;drawCV();},{passive:false});
   cv.addEventListener("touchstart",e=>{if(e.touches.length===1)drag={x:e.touches[0].clientX,y:e.touches[0].clientY};else if(e.touches.length===2)pinch=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);},{passive:true});
@@ -773,9 +886,13 @@ function drawCV(){
   });
   const usedLen=res.placed.length?Math.max(...res.placed.map(p=>p.x+p.length)):0,remLen=Math.max(0,panel.length-usedLen);
   const bx=cw-148,by=ch-92,bw2=138,bh2=82;
+  _sumBox={bx,by,bw2,bh2};
   ctx.fillStyle="rgba(30,33,48,.9)";ctx.strokeStyle="#2E3448";ctx.lineWidth=1;ctx.fillRect(bx,by,bw2,bh2);ctx.strokeRect(bx,by,bw2,bh2);
   ctx.fillStyle="#9BA3B2";ctx.font="9px 'Courier New'";ctx.textAlign="left";
   [`총길이: ${fd(panel.length/1000)}m`,`총폭: ${fd(panel.width/1000)}m`,`사용: ${fd(usedLen/1000)}m`,`잔여: ${fd(remLen/1000)}m`,`조각: ${res.placed.length}개`].forEach((l,i)=>ctx.fillText(l,bx+7,by+13+i*14));
+  // 클릭 힌트
+  ctx.fillStyle="rgba(255,255,255,0.28)";ctx.font="8px 'Courier New'";ctx.textAlign="center";
+  ctx.fillText("▶ 클릭하면 상세 보기",bx+bw2/2,by+bh2-4);
 }
 function renderFTabs(){
   const w=document.getElementById("filmTabs");w.innerHTML="";
@@ -797,6 +914,30 @@ function updIB(){
   });
 }
 
+/* === 요약 팝업 === */
+function openSumPopup(){
+  if(!results.length)return;
+  let html="";
+  results.forEach((r,i)=>{
+    const u=r.placed.length?Math.max(...r.placed.map(p=>p.x+p.length)):0;
+    const rm=Math.max(0,r.panel.length-u),ratio=r.panel.length?(u/r.panel.length*100).toFixed(1):0;
+    html+=`<div style="background:var(--cv);border:1px solid var(--ln);border-radius:6px;padding:10px;margin-bottom:8px${i===curFilm?";border-color:var(--ac)":""}">
+      <div style="font-size:12px;font-weight:700;color:var(--hd);margin-bottom:6px">${i+1}. ${esc(r.panel.name||"Film")}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:11px;margin-bottom:6px">
+        <div><span style="color:#868E96">총길이 </span><b>${fd(r.panel.length/1000)}m</b></div>
+        <div><span style="color:#868E96">총폭 </span><b>${fd(r.panel.width/1000)}m</b></div>
+        <div><span style="color:#868E96">사용 </span><b style="color:var(--ac)">${fd(u/1000)}m</b></div>
+        <div><span style="color:#868E96">잔여 </span><b style="color:var(--sc)">${fd(rm/1000)}m</b></div>
+        <div><span style="color:#868E96">조각 </span><b>${r.placed.length}개</b></div>
+        <div><span style="color:#868E96">사용률 </span><b>${ratio}%</b></div>
+      </div>
+      <div style="background:var(--ln);border-radius:3px;height:4px;overflow:hidden"><div style="height:100%;background:linear-gradient(90deg,#343A40,#339AF0);width:${ratio}%"></div></div>
+    </div>`;
+  });
+  document.getElementById("sumC").innerHTML=html;
+  document.getElementById("sumMo").classList.add("on");
+}
+
 /* === Full 보기 === */
 const fcv=document.getElementById("fullCv"),fctx=fcv.getContext("2d");
 function openFull(idx){
@@ -809,7 +950,7 @@ function openFull(idx){
   let fd2=null,fPinch=null;
   fcv.onmousedown=e=>{fd2={x:e.clientX,y:e.clientY};};
   fcv.onmousemove=e=>{if(!fd2)return;fX+=e.clientX-fd2.x;fY+=e.clientY-fd2.y;fd2={x:e.clientX,y:e.clientY};drawFull();};
-  fcv.onmouseup=()=>fd2=null;
+  fcv.onmouseup=()=>{fd2=null;fcv.style.cursor="grab";};
   fcv.onwheel=e=>{e.preventDefault();fS*=e.deltaY<0?1.1:.9;drawFull();};
   // 터치 드래그 / 핀치줌 (passive:false 필요 → addEventListener)
   if(!fcv._touchBound){
@@ -831,7 +972,7 @@ function drawFull(){
   // 치수 라벨
   fctx.fillStyle="#9BA3B2";fctx.font="11px 'Courier New'";fctx.textAlign="center";
   fctx.fillText(fd(panel.length/1000)+"m",ox+panel.length*scale/2,oy-10);
-  fctx.save();fctx.translate(ox-14,oy+panel.width*scale/2);fctx.rotate(-Math.PI/2);fctx.textAlign="center";fctx.fillText(fd(panel.width/1000)+"m",0,0);fctx.restore();
+  fctx.save();fctx.translate(ox-18,oy+panel.width*scale/2);fctx.rotate(-Math.PI/2);fctx.textAlign="center";fctx.fillText(fd(panel.width/1000)+"m",0,0);fctx.restore();
   // 잔여 영역 (line mode에서는 점선 없음)
   if(!lineMode){
     fctx.strokeStyle="#E03131";fctx.lineWidth=1;fctx.setLineDash([4,2]);
@@ -877,12 +1018,17 @@ function drawFull(){
     });
     fctx.setLineDash([]);fctx.restore();
   }
-  // 정보박스
+  // 정보박스 (fcv 기준 — Full 모달 캔버스 크기 사용)
   const usedLen=res.placed.length?Math.max(...res.placed.map(p=>p.x+p.length)):0,remLen=Math.max(0,panel.length-usedLen);
-  const bx=fcv.width-148,by=fcv.height-92,bw2=138,bh2=82;
-  fctx.fillStyle="rgba(30,33,48,.9)";fctx.strokeStyle="#2E3448";fctx.lineWidth=1;fctx.fillRect(bx,by,bw2,bh2);fctx.strokeRect(bx,by,bw2,bh2);
+  const fbx=fcv.width-148,fby=fcv.height-92,fbw2=138,fbh2=82;
+  fctx.fillStyle="rgba(30,33,48,.9)";fctx.strokeStyle="#2E3448";fctx.lineWidth=1;fctx.fillRect(fbx,fby,fbw2,fbh2);fctx.strokeRect(fbx,fby,fbw2,fbh2);
   fctx.fillStyle="#9BA3B2";fctx.font="9px 'Courier New'";fctx.textAlign="left";
-  [`총길이: ${fd(panel.length/1000)}m`,`총폭: ${fd(panel.width/1000)}m`,`사용: ${fd(usedLen/1000)}m`,`잔여: ${fd(remLen/1000)}m`,`조각: ${res.placed.length}개`].forEach((l,i)=>fctx.fillText(l,bx+7,by+13+i*14));
+  [`총길이: ${fd(panel.length/1000)}m`,`총폭: ${fd(panel.width/1000)}m`,`사용: ${fd(usedLen/1000)}m`,`잔여: ${fd(remLen/1000)}m`,`조각: ${res.placed.length}개`].forEach((l,i)=>fctx.fillText(l,fbx+7,fby+13+i*14));
+  // 라인 모드일 때 절단 통계 추가 표시
+  if(lineMode){
+    fctx.fillStyle="rgba(255,255,255,0.22)";fctx.font="8px 'Courier New'";fctx.textAlign="center";
+    fctx.fillText("☰ LINE MODE",fbx+fbw2/2,fby+fbh2-4);
+  }
 }
 function fzoom(f){fS*=f;drawFull();}function fresetZoom(){fS=1;fX=0;fY=0;drawFull();}
 function toggleLineMode(){
