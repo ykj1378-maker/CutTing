@@ -100,7 +100,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--tx);height:100vh;o
 
 /* 테이블 */
 .ptbl{margin-bottom:13px;border:1px solid var(--ln);border-top:none;border-radius:0 0 5px 5px;overflow:hidden}
-.prow,.crow{display:flex;align-items:center;gap:3px;padding:3px 5px;background:var(--fr);border-bottom:1px solid var(--ln)}
+.prow,.crow{display:flex;align-items:center;gap:3px;padding:3px 5px;background:var(--fr);border-bottom:1px solid var(--ln);overflow:hidden}
 .prow:last-child,.crow:last-child{border-bottom:none}
 .prow:hover,.crow:hover{background:#F8F9FA}
 
@@ -294,13 +294,13 @@ body{font-family:var(--font);background:var(--bg);color:var(--tx);height:100vh;o
   <!-- Film(원자재) 헤더 -->
   <div style="border:1px solid var(--ln);border-radius:7px;padding:10px 10px 6px;margin-bottom:13px;background:var(--fr)">
   <div class="slbl" style="margin-bottom:7px">📦 원자재 (Film)<span class="sadd" onclick="addPanel()">+ Film 추가</span></div>
-  <div class="thdr">
-    <span style="width:28px">NO</span>
-    <span style="width:90px;text-align:left;padding-left:4px">이름</span>
-    <span style="width:100px">길이(mm)</span>
-    <span style="width:100px">폭(mm)</span>
-    <span style="width:32px">Grain</span>
-    <span style="width:20px"></span>
+  <div class="thdr" style="gap:3px;padding:4px 5px">
+    <span style="width:28px;flex-shrink:0">NO</span>
+    <span style="width:88px;flex-shrink:0;text-align:left;padding-left:4px">이름</span>
+    <span style="width:98px;flex-shrink:0">길이(mm)</span>
+    <span style="width:98px;flex-shrink:0">폭(mm)</span>
+    <span style="width:32px;flex-shrink:0">Grain</span>
+    <span style="width:20px;flex-shrink:0"></span>
   </div>
   <div class="ptbl" id="panelTbl" style="margin-bottom:0"></div>
   </div>
@@ -492,13 +492,29 @@ function renderPanelTbl(){
     // NO 버튼
     const nb=mkBtn("nobtn",i+1,()=>scrollToSec(i));nb.style.width="28px";
     // 이름
-    const n=mkInp("ci","text",p.name||"","Film명",v=>{panels[i].name=v;updSecTitle(i);schedCalc();},"name");n.style.width="90px";n.style.flexShrink="0";
+    const n=mkInp("ci","text",p.name||"","Film명",v=>{panels[i].name=v;updSecTitle(i);schedCalc();},"name");
+    n.style.width="88px";n.style.flexShrink="0";
     n.addEventListener("keydown",e=>panKey(e,i,"name"));
-    // 길이
-    const l=mkInp("ci","number",p.length||"","길이",v=>{panels[i].length=+v;if(v&&!panels[i].width){panels[i].width=1220;renderPanelTbl();}schedCalc();},"length");l.style.width="100px";
+    // 길이 — renderPanelTbl 재호출 없이 포커스 유지
+    const l=mkInp("ci","number",p.length||"","길이",v=>{
+      panels[i].length=+v;
+      // 폭 기본값은 blur 시점에만 처리 (포커스 이탈 방지)
+      schedCalc();
+    },"length");
+    l.style.width="98px";l.style.flexShrink="0";
+    l.addEventListener("blur",()=>{
+      if(panels[i].length&&!panels[i].width){
+        panels[i].width=1220;
+        // 폭 셀만 값 갱신 (DOM 재생성 없이)
+        const rows=document.querySelectorAll("#panelTbl .prow");
+        if(rows[i]){const wInp=rows[i].querySelector('input[data-col="width"]');if(wInp)wInp.value=1220;}
+        schedCalc();
+      }
+    });
     l.addEventListener("keydown",e=>panKey(e,i,"length"));
     // 폭
-    const w=mkInp("ci","number",p.width||"","폭",v=>{panels[i].width=+v;chkAddPanel(i);schedCalc();},"width");w.style.width="100px";
+    const w=mkInp("ci","number",p.width||"","폭",v=>{panels[i].width=+v;chkAddPanel(i);schedCalc();},"width");
+    w.style.width="98px";w.style.flexShrink="0";
     w.addEventListener("keydown",e=>panKey(e,i,"width"));
     // Grain
     const cb=document.createElement("input");cb.type="checkbox";cb.className="gcb";cb.style.width="32px";cb.checked=p.grain;
@@ -554,7 +570,7 @@ function buildSec(pi){
   tr.append(no,nm,ab);
   // 헤더
   const hdr=document.createElement("div");hdr.className="thdr";
-  [["이름","flex:1;text-align:left;padding-left:4px;min-width:70px"],["길이(mm)","width:78px"],["폭(mm)","width:78px"],["수량","width:54px"],["색상","width:28px"],["","width:20px"]].forEach(([t,s])=>{
+  [["이름","flex:1;text-align:left;padding-left:4px;min-width:70px"],["길이(mm)","width:98px;flex-shrink:0"],["폭(mm)","width:98px;flex-shrink:0"],["수량","width:54px;flex-shrink:0"],["색상","width:28px;flex-shrink:0"],["","width:20px;flex-shrink:0"]].forEach(([t,s])=>{
     const sp=document.createElement("span");sp.textContent=t;sp.style.cssText=s;hdr.appendChild(sp);
   });
   // 테이블
@@ -574,13 +590,13 @@ function appendCRow(pi,ji,tbl){
   const n=mkInp("ci","text",pt.name||"","조각명",v=>{parts[pi][ji].name=v;schedCalc();},"name");n.style.flex="1";
   n.addEventListener("keydown",e=>cutKey(e,pi,ji,"name"));
   // 길이
-  const l=mkInp("ci","number",pt.length||"","mm",v=>{parts[pi][ji].length=+v;schedCalc();chkAddPart(pi,ji);},"length");l.style.width="78px";
+  const l=mkInp("ci","number",pt.length||"","mm",v=>{parts[pi][ji].length=+v;schedCalc();chkAddPart(pi,ji);},"length");l.style.width="98px";l.style.flexShrink="0";
   l.addEventListener("keydown",e=>cutKey(e,pi,ji,"length"));
   // 폭
-  const w=mkInp("ci","number",pt.width||"","mm",v=>{parts[pi][ji].width=+v;schedCalc();chkAddPart(pi,ji);},"width");w.style.width="78px";
+  const w=mkInp("ci","number",pt.width||"","mm",v=>{parts[pi][ji].width=+v;schedCalc();chkAddPart(pi,ji);},"width");w.style.width="98px";w.style.flexShrink="0";
   w.addEventListener("keydown",e=>cutKey(e,pi,ji,"width"));
   // 수량
-  const q=mkInp("ci","number",pt.quantity||1,"수량",null,"quantity");q.min="1";q.style.width="54px";
+  const q=mkInp("ci","number",pt.quantity||1,"수량",null,"quantity");q.min="1";q.style.width="54px";q.style.flexShrink="0";
   q.addEventListener("input",()=>{parts[pi][ji].quantity=Math.max(1,+q.value);schedCalc();});
   q.addEventListener("keydown",e=>cutKey(e,pi,ji,"quantity"));
   // 색상
