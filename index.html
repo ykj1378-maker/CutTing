@@ -674,8 +674,16 @@ function appendCRow(pi,ji,tbl){
     const wasLast=ji===parts[pi].length-1;
     const lenOk=parseFloat(parts[pi][ji].length)>0,widOk=parseFloat(parts[pi][ji].width)>0;
     if(wasLast&&lenOk&&widOk){
-      // 자동 행 추가 → 새 행 이름 셀로 포커스
+      // 자동 행 추가 → rebuildSec으로 DOM 재생성되므로 setTimeout으로 새 DOM에서 수량 찾기
       chkAddPart(pi,ji);
+      // addPart 내부 setTimeout(50ms)이 새 마지막 행 이름으로 포커스를 줌 — 그 전에 수량으로 먼저 이동
+      setTimeout(()=>{
+        const t=document.getElementById(`ct_${pi}`);
+        if(!t)return;
+        const rows=t.querySelectorAll(".crow");
+        // ji행이 아직 존재하면 수량으로 이동 (새 행이 추가된 직후이므로 ji행은 유효)
+        if(rows[ji]){const qq=rows[ji].querySelector('input[data-col="quantity"]');if(qq){qq.focus();qq.select();}}
+      },10);
     } else {
       // 자동 추가 없음 → 수량 셀로 포커스
       const t=document.getElementById(`ct_${pi}`);
