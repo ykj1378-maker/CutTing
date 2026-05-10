@@ -13,6 +13,15 @@
 <title>cutting_s</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<!-- SHA-256: 반드시 Firebase module보다 먼저 로드 -->
+<script>
+async function _sha256(str){
+  const buf=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,"0")).join("");
+}
+window._sha256=_sha256;
+</script>
+
 <script type="module">
 import{initializeApp}from"https://www.gstatic.com/firebasejs/10.12.1/firebase-app.js";
 import{getFirestore,doc,setDoc,getDoc,collection,getDocs,orderBy,query,limit}from"https://www.gstatic.com/firebasejs/10.12.1/firebase-firestore.js";
@@ -24,31 +33,29 @@ window._fbGetUsers=async()=>{
   try{
     const s=await getDoc(doc(db,UC,"accounts"));
     if(s.exists())return s.data().list||{};
-    /* 최초 기본 계정 — 비밀번호도 해시로 저장 */
     const h=await window._sha256("12345");
     const d={"12345":h};
     await setDoc(doc(db,UC,"accounts"),{list:d});
     return d;
-  }catch{return{};}
+  }catch(e){console.error("fbGetUsers:",e);return{};}
 };
 
-/* 계정 저장 */
-window._fbSaveUsers=async u=>{try{await setDoc(doc(db,UC,"accounts"),{list:u});return true;}catch{return false;}};
+/* 계정 저장 — 오류 상세 로깅 */
+window._fbSaveUsers=async u=>{
+  try{
+    await setDoc(doc(db,UC,"accounts"),{list:u});
+    return true;
+  }catch(e){
+    console.error("fbSaveUsers error:",e);
+    return false;
+  }
+};
 
 window._fbSave=async o=>{try{const p=JSON.stringify(o),t=new Date().toISOString();await setDoc(doc(db,CO,"latest"),{payload:p,savedAt:t,savedBy:o._savedBy||""});await setDoc(doc(db,CO,"bk_"+t.replace(/[:.]/g,"-")),{payload:p,savedAt:t,savedBy:o._savedBy||""});return{ok:true,savedAt:t};}catch(e){return{ok:false,error:e.message};}};
 window._fbLoad=async()=>{try{const s=await getDoc(doc(db,CO,"latest"));if(s.exists()){const d=s.data();return{ok:true,data:JSON.parse(d.payload),savedAt:d.savedAt,savedBy:d.savedBy};}return{ok:false};}catch(e){return{ok:false,error:e.message};}};
 window._fbListBackups=async()=>{try{const q=query(collection(db,CO),orderBy("savedAt","desc"),limit(10));const s=await getDocs(q);return s.docs.filter(d=>d.id!=="latest").map(d=>({id:d.id,savedAt:d.data().savedAt,savedBy:d.data().savedBy}));}catch{return[];}};
 window._fbLoadBackup=async id=>{try{const s=await getDoc(doc(db,CO,id));if(s.exists())return{ok:true,data:JSON.parse(s.data().payload)};return{ok:false};}catch{return{ok:false};}};
 window._fbReady=true;
-</script>
-
-<!-- SHA-256: 모듈 밖 일반 스크립트로 항상 먼저 로드 -->
-<script>
-async function _sha256(str){
-  const buf=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(str));
-  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,"0")).join("");
-}
-window._sha256=_sha256;
 </script>
 <style>
 /* === PC앱 색상 변수 === */
@@ -89,8 +96,9 @@ body{font-family:var(--font);background:var(--bg);color:var(--tx);height:100vh;o
 #MB{height:32px;background:var(--fr);border-bottom:1px solid var(--ln);display:flex;align-items:center;padding:0 8px;gap:1px;flex-shrink:0;user-select:none}
 .mi{position:relative;padding:3px 9px;font-size:12px;color:var(--tx);cursor:pointer;border-radius:3px}
 .mi:hover{background:var(--cv)}
+.mi.open{background:var(--cv)}
 .md{display:none;position:absolute;top:calc(100% + 2px);left:0;background:var(--fr);border:1px solid var(--ln);border-radius:6px;min-width:155px;box-shadow:0 4px 14px rgba(0,0,0,.12);z-index:500;overflow:hidden}
-.mi:hover .md{display:block}
+.mi.open .md{display:block}
 .mdi{padding:7px 13px;font-size:12px;color:var(--tx);cursor:pointer;white-space:nowrap}
 .mdi:hover{background:var(--cv)}
 .mds{height:1px;background:var(--ln);margin:3px 0}
@@ -276,7 +284,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--tx);height:100vh;o
 
 <!-- 메뉴바 -->
 <div id="MB">
-  <div class="mi">파일<div class="md">
+  <div class="mi" onclick="toggleMenu(this)">파일<div class="md">
     <div class="mdi" onclick="fbSave()">☁️ 클라우드 저장</div>
     <div class="mdi" onclick="fbLoad()">☁️ 클라우드 불러오기</div>
     <div class="mdi" onclick="fbBackups()">🕓 백업 목록</div>
@@ -284,11 +292,11 @@ body{font-family:var(--font);background:var(--bg);color:var(--tx);height:100vh;o
     <div class="mdi" onclick="localSave()">💾 기기 저장</div>
     <div class="mdi" onclick="localLoad()">📂 기기 열기</div>
   </div></div>
-  <div class="mi">보기<div class="md">
+  <div class="mi" onclick="toggleMenu(this)">보기<div class="md">
     <div class="mdi" onclick="openStats()">📊 통계</div>
     <div class="mdi" onclick="openFull()">🔲 Full 보기</div>
   </div></div>
-  <div class="mi">설정<div class="md">
+  <div class="mi" onclick="toggleMenu(this)">설정<div class="md">
     <div class="mdi" onclick="openUsers()">👤 아이디 추가/변경</div>
     <div class="mds"></div>
     <div class="mdi" onclick="openGists()">🐙 GitHub Gists 설정</div>
@@ -577,11 +585,21 @@ window.addEventListener("DOMContentLoaded",()=>{
   document.getElementById("remId").checked=ri;
   document.getElementById("remPw").checked=rp;
   if(ri) document.getElementById("lUid").value=localStorage.getItem("cut_uid")||"";
-  /* 비밀번호는 해시(64자)이므로 입력란에 표시하지 않음
-     — 체크박스만 유지하고 자동 로그인은 지원하지 않음 (보안) */
   ["lUid","lPwd"].forEach(id=>document.getElementById(id).addEventListener("keydown",e=>{if(e.key==="Enter")doLogin();}));
+  /* 메뉴 외부 클릭 시 닫기 */
+  document.addEventListener("click",e=>{
+    if(!e.target.closest(".mi"))
+      document.querySelectorAll(".mi.open").forEach(m=>m.classList.remove("open"));
+  });
   buildCG();initRZ();
 });
+
+/* === 메뉴 토글 === */
+function toggleMenu(el){
+  const isOpen=el.classList.contains("open");
+  document.querySelectorAll(".mi.open").forEach(m=>m.classList.remove("open"));
+  if(!isOpen) el.classList.add("open");
+}
 
 /* === 로그인 === */
 async function doLogin(){
