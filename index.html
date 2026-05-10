@@ -180,10 +180,11 @@ body{font-family:var(--font);background:var(--bg);color:var(--tx);height:100vh;o
 .mb_{padding:7px 16px;border-radius:5px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--font)}
 .mb_.p{background:var(--bb);color:#fff;border:none}.mb_.p:hover{background:#495057}
 .mb_.s{background:var(--cv);color:var(--tx);border:1px solid var(--ln)}.mb_.s:hover{background:var(--ln)}
-.ui{display:flex;align-items:center;gap:7px;padding:7px 9px;background:var(--cv);border:1px solid var(--ln);border-radius:5px;margin-bottom:5px}
-.uid{font-size:12px;font-weight:700;flex:1;color:var(--hd)}
-.udel{background:none;border:none;color:#ADB5BD;cursor:pointer;font-size:14px}
-.udel:hover{color:var(--sc)}
+.ui{display:flex;align-items:center;gap:7px;padding:8px 11px;background:var(--fr);border:1px solid var(--ln);border-radius:5px;margin-bottom:5px}
+.uid{font-size:13px;font-weight:700;flex:1;color:var(--hd)}
+.upw{font-size:11px;color:#ADB5BD;min-width:60px;letter-spacing:2px}
+.udel{background:none;border:1px solid var(--ln);border-radius:4px;color:#ADB5BD;cursor:pointer;font-size:12px;padding:2px 7px;transition:all .15s}
+.udel:hover{color:var(--sc);border-color:var(--sc);background:#FFF5F5}
 .bki{display:flex;align-items:center;gap:7px;padding:7px 9px;background:var(--cv);border:1px solid var(--ln);border-radius:5px;margin-bottom:5px;cursor:pointer}
 .bki:hover{border-color:var(--ac)}
 .bkw{font-size:11px;flex:1;color:var(--tx)}
@@ -362,11 +363,28 @@ body{font-family:var(--font);background:var(--bg);color:var(--tx);height:100vh;o
 <div class="mo" id="usersMo">
 <div class="mc">
   <div class="mct">👤 아이디 추가/변경<button class="mcl" onclick="cmo('usersMo')">✕</button></div>
-  <div id="uList" style="margin-bottom:12px"></div>
+
+  <!-- 등록된 계정 목록 -->
+  <div style="margin-bottom:12px">
+    <div style="font-size:11px;font-weight:700;color:var(--hd);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">등록된 계정</div>
+    <div id="uList"><p style="font-size:12px;color:#868E96;padding:8px 0">불러오는 중...</p></div>
+  </div>
+
+  <!-- 추가/변경 폼 -->
   <div style="background:var(--cv);border:1px solid var(--ln);border-radius:6px;padding:13px">
-    <div class="mf"><label>아이디</label><input id="nUid" placeholder="아이디 입력"></div>
-    <div class="mf"><label>비밀번호</label><input type="password" id="nPwd" placeholder="비밀번호 입력"></div>
-    <button class="abtn" style="font-size:12px" onclick="upsertUser()">추가 / 변경 적용</button>
+    <div style="font-size:11px;font-weight:700;color:var(--hd);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">➕ 계정 추가 / 변경</div>
+    <div class="mf">
+      <label>아이디</label>
+      <input id="nUid" placeholder="아이디 입력" autocomplete="off">
+    </div>
+    <div class="mf">
+      <label>비밀번호</label>
+      <div style="position:relative;display:flex;align-items:center">
+        <input type="password" id="nPwd" placeholder="비밀번호 입력" autocomplete="off" style="flex:1;padding-right:36px">
+        <button onclick="togglePwVis('nPwd',this)" style="position:absolute;right:8px;background:none;border:none;cursor:pointer;font-size:14px;color:#868E96;padding:0;line-height:1">👁</button>
+      </div>
+    </div>
+    <button class="abtn" style="font-size:12px;margin-top:4px" onclick="upsertUser()">✅ 추가 / 변경 적용</button>
   </div>
   <div class="mbs"><button class="mb_ s" onclick="cmo('usersMo')">닫기</button></div>
 </div></div>
@@ -1517,24 +1535,69 @@ function openStats(){
 }
 
 /* === 계정 === */
+function togglePwVis(inputId, btn) {
+  const inp = document.getElementById(inputId);
+  if (inp.type === "password") { inp.type = "text"; btn.textContent = "🙈"; }
+  else { inp.type = "password"; btn.textContent = "👁"; }
+}
+
 async function openUsers(){
   document.getElementById("usersMo").classList.add("on");
-  if(!window._fbReady){document.getElementById("uList").innerHTML="<p style='font-size:12px;color:#868E96'>Firebase 연결 중...</p>";return;}
-  const users=await window._fbGetUsers();
-  document.getElementById("uList").innerHTML=Object.keys(users).map(u=>`<div class="ui"><span class="uid">${esc(u)}</span><span style="font-size:11px;color:#ADB5BD">●●●●●</span><button class="udel" onclick="delUser('${esc(u)}')">×</button></div>`).join("");
+  await refreshUList();
 }
+
+async function refreshUList(){
+  const el = document.getElementById("uList");
+  if(!window._fbReady){
+    el.innerHTML="<p style='font-size:12px;color:#868E96;padding:8px 0'>⏳ Firebase 연결 중... 잠시 후 다시 시도하세요.</p>";
+    return;
+  }
+  el.innerHTML="<p style='font-size:12px;color:#868E96;padding:4px 0'>불러오는 중...</p>";
+  const users = await window._fbGetUsers();
+  const keys = Object.keys(users);
+  if(!keys.length){
+    el.innerHTML="<p style='font-size:12px;color:#868E96;padding:4px 0'>등록된 계정이 없습니다.</p>";
+    return;
+  }
+  el.innerHTML = keys.map(u=>`
+    <div class="ui">
+      <span style="font-size:16px">👤</span>
+      <span class="uid">${esc(u)}</span>
+      <span class="upw">●●●●●</span>
+      <button class="udel" onclick="delUser('${esc(u)}')">삭제</button>
+    </div>`).join("");
+}
+
 async function upsertUser(){
-  const uid=document.getElementById("nUid").value.trim(),pw=document.getElementById("nPwd").value.trim();
-  if(!uid||!pw){toast("아이디/비밀번호를 입력하세요");return;}
-  if(!window._fbReady){toast("Firebase 연결 중...");return;}
-  const users=await window._fbGetUsers();users[uid]=pw;await window._fbSaveUsers(users);
-  toast("✅ 저장됐습니다");document.getElementById("nUid").value="";document.getElementById("nPwd").value="";openUsers();
+  const uid = document.getElementById("nUid").value.trim();
+  const pw  = document.getElementById("nPwd").value.trim();
+  if(!uid || !pw){ toast("⚠️ 아이디와 비밀번호를 모두 입력하세요"); return; }
+  if(!window._fbReady){ toast("⏳ Firebase 연결 중... 잠시 후 다시 시도하세요"); return; }
+  const btn = document.querySelector("#usersMo .abtn");
+  btn.textContent = "저장 중..."; btn.disabled = true;
+  const users = await window._fbGetUsers();
+  const isNew = !users[uid];
+  users[uid] = pw;
+  const ok = await window._fbSaveUsers(users);
+  btn.textContent = "✅ 추가 / 변경 적용"; btn.disabled = false;
+  if(ok){
+    toast(isNew ? `✅ '${uid}' 계정이 추가됐습니다` : `✅ '${uid}' 비밀번호가 변경됐습니다`);
+    document.getElementById("nUid").value = "";
+    document.getElementById("nPwd").value = "";
+    await refreshUList();
+  } else {
+    toast("❌ 저장 실패 — Firebase 오류");
+  }
 }
+
 async function delUser(uid){
-  if(!confirm(`'${uid}' 계정을 삭제할까요?`))return;
-  const users=await window._fbGetUsers();
-  if(Object.keys(users).length<=1){toast("최소 1개 계정이 필요합니다");return;}
-  delete users[uid];await window._fbSaveUsers(users);toast("삭제됐습니다");openUsers();
+  if(!confirm(`'${uid}' 계정을 삭제할까요?`)) return;
+  const users = await window._fbGetUsers();
+  if(Object.keys(users).length <= 1){ toast("⚠️ 최소 1개 계정이 필요합니다"); return; }
+  delete users[uid];
+  const ok = await window._fbSaveUsers(users);
+  if(ok){ toast(`🗑 '${uid}' 삭제됐습니다`); await refreshUList(); }
+  else toast("❌ 삭제 실패 — Firebase 오류");
 }
 
 /* === GitHub Gists === */
