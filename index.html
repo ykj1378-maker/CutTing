@@ -105,7 +105,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--tx);height:100vh;o
 .prow:hover,.crow:hover{background:#F8F9FA}
 
 /* 입력 셀 */
-.ci{background:var(--eb);border:1px solid var(--ln);border-radius:4px;padding:5px 6px;font-size:13px;color:var(--ef);outline:none;font-family:var(--font);min-width:0;width:100%;transition:border-color .15s,box-shadow .15s}
+.ci{background:var(--eb);border:1px solid var(--ln);border-radius:4px;padding:5px 6px;font-size:13px;color:var(--ef);outline:none;font-family:var(--font);min-width:0;flex-shrink:0;transition:border-color .15s,box-shadow .15s}
 .ci:focus{border-color:var(--ac);box-shadow:0 0 0 2px rgba(51,154,240,.1)}
 .ci::placeholder{color:#ADB5BD;font-size:11px}
 
@@ -296,10 +296,10 @@ body{font-family:var(--font);background:var(--bg);color:var(--tx);height:100vh;o
   <div class="slbl" style="margin-bottom:7px">📦 원자재 (Film)<span class="sadd" onclick="addPanel()">+ Film 추가</span></div>
   <div class="thdr" style="gap:3px;padding:4px 5px">
     <span style="width:28px;flex-shrink:0">NO</span>
-    <span style="width:88px;flex-shrink:0;text-align:left;padding-left:4px">이름</span>
-    <span style="width:98px;flex-shrink:0">길이(mm)</span>
-    <span style="width:98px;flex-shrink:0">폭(mm)</span>
-    <span style="width:32px;flex-shrink:0">Grain</span>
+    <span style="width:120px;flex-shrink:0;text-align:left;padding-left:4px">이름</span>
+    <span style="width:142px;flex-shrink:0">길이(mm)</span>
+    <span style="width:142px;flex-shrink:0">폭(mm)</span>
+    <span style="width:32px;flex-shrink:0;text-align:center">Grain</span>
     <span style="width:20px;flex-shrink:0"></span>
   </div>
   <div class="ptbl" id="panelTbl" style="margin-bottom:0"></div>
@@ -491,56 +491,66 @@ function renderPanelTbl(){
     const row=document.createElement("div");row.className="prow";
     // NO 버튼
     const nb=mkBtn("nobtn",i+1,()=>scrollToSec(i));nb.style.width="28px";
-    // 이름
+    // 이름 (120px)
     const n=mkInp("ci","text",p.name||"","Film명",v=>{panels[i].name=v;updSecTitle(i);schedCalc();},"name");
-    n.style.width="88px";n.style.flexShrink="0";
+    n.style.width="120px";
     n.addEventListener("keydown",e=>panKey(e,i,"name"));
-    // 길이 — renderPanelTbl 재호출 없이 포커스 유지
-    const l=mkInp("ci","number",p.length||"","길이",v=>{
-      panels[i].length=+v;
-      // 폭 기본값은 blur 시점에만 처리 (포커스 이탈 방지)
-      schedCalc();
-    },"length");
-    l.style.width="98px";l.style.flexShrink="0";
+    // 길이 (142px) — input 이벤트는 데이터 저장만, DOM 재생성 절대 없음
+    const l=mkInp("ci","number",p.length||"","길이",v=>{panels[i].length=+v;schedCalc();},"length");
+    l.style.width="142px";
+    l.addEventListener("keydown",e=>panKey(e,i,"length"));
+    // blur 시 폭 기본값 설정 (포커스가 이미 떠난 후이므로 안전)
     l.addEventListener("blur",()=>{
-      if(panels[i].length&&!panels[i].width){
+      if(panels[i].length>0&&!panels[i].width){
         panels[i].width=1220;
-        // 폭 셀만 값 갱신 (DOM 재생성 없이)
         const rows=document.querySelectorAll("#panelTbl .prow");
-        if(rows[i]){const wInp=rows[i].querySelector('input[data-col="width"]');if(wInp)wInp.value=1220;}
+        if(rows[i]){const wi=rows[i].querySelector('input[data-col="width"]');if(wi&&!wi.value)wi.value=1220;}
         schedCalc();
       }
     });
-    l.addEventListener("keydown",e=>panKey(e,i,"length"));
-    // 폭
-    const w=mkInp("ci","number",p.width||"","폭",v=>{panels[i].width=+v;chkAddPanel(i);schedCalc();},"width");
-    w.style.width="98px";w.style.flexShrink="0";
+    // 폭 (142px)
+    const w=mkInp("ci","number",p.width||"","폭",v=>{panels[i].width=+v;schedCalc();},"width");
+    w.style.width="142px";
     w.addEventListener("keydown",e=>panKey(e,i,"width"));
-    // Grain
-    const cb=document.createElement("input");cb.type="checkbox";cb.className="gcb";cb.style.width="32px";cb.checked=p.grain;
+    // 폭 blur — 마지막 행 채워졌을 때만 새 행 추가 (blur 시점 = 입력 완료)
+    w.addEventListener("blur",()=>chkAddPanel(i));
+    // Grain (32px)
+    const cb=document.createElement("input");cb.type="checkbox";cb.className="gcb";cb.style.width="32px";cb.style.flexShrink="0";cb.checked=p.grain;
     cb.addEventListener("change",()=>{panels[i].grain=cb.checked;schedCalc();});
-    // 삭제
+    // 삭제 (20px)
     const del=mkBtn("delbtn","×",()=>removePanel(i));
     row.append(nb,n,l,w,cb,del);tbl.appendChild(row);
   });
 }
+// Enter 키: 같은 행의 다음 열로 이동 (폭 마지막이면 다음 Film 행 이름으로)
 function panKey(e,pi,col){
-  if(e.key!=="Enter"&&e.key!=="Tab")return;
-  if(e.key==="Tab")return; // Tab은 기본동작 허용
+  if(e.key!=="Enter")return;
   e.preventDefault();
   const colOrder=["name","length","width"];
   const curIdx=colOrder.indexOf(col);
   const rows=document.querySelectorAll("#panelTbl .prow");
-  // 같은 행의 다음 열로 이동
   if(curIdx<colOrder.length-1){
-    const inp=rows[pi].querySelector(`input[data-col="${colOrder[curIdx+1]}"]`);if(inp){inp.focus();inp.select();}
-  } else if(pi<panels.length-1){
-    const inp=rows[pi+1].querySelector(`input[data-col="name"]`);if(inp){inp.focus();inp.select();}
+    // 다음 열
+    const inp=rows[pi].querySelector(`input[data-col="${colOrder[curIdx+1]}"]`);
+    if(inp){inp.focus();inp.select();}
+  } else if(pi<rows.length-1){
+    // 다음 행 이름
+    const inp=rows[pi+1].querySelector('input[data-col="name"]');
+    if(inp){inp.focus();inp.select();}
   } else {
-    setTimeout(()=>{const s=document.getElementById(`cs_${pi}`);if(s){const inp=s.querySelector("input.ci");if(inp){inp.focus();inp.select();}}},50);
+    // 마지막 Film 폭에서 Enter → blur가 chkAddPanel 트리거, 새 행 생성 후 조각 섹션으로
+    setTimeout(()=>{
+      const s=document.getElementById(`cs_${pi}`);
+      if(s){const inp=s.querySelector("input.ci");if(inp){inp.focus();inp.select();}}
+    },80);
   }
 }
-function chkAddPanel(i){if(i!==panels.length-1)return;const p=panels[i];if(+p.length>0&&+p.width>0)addPanel();}
+// 마지막 행 폭 blur 시에만 새 Film 행 자동 추가
+function chkAddPanel(i){
+  if(i!==panels.length-1)return;
+  const p=panels[i];
+  if(+p.length>0&&+p.width>0)addPanel();
+}
 
 /* === 조각 섹션 === */
 function renderPartsSecs(){
@@ -570,7 +580,7 @@ function buildSec(pi){
   tr.append(no,nm,ab);
   // 헤더
   const hdr=document.createElement("div");hdr.className="thdr";
-  [["이름","flex:1;text-align:left;padding-left:4px;min-width:70px"],["길이(mm)","width:98px;flex-shrink:0"],["폭(mm)","width:98px;flex-shrink:0"],["수량","width:54px;flex-shrink:0"],["색상","width:28px;flex-shrink:0"],["","width:20px;flex-shrink:0"]].forEach(([t,s])=>{
+  [["이름","flex:1;text-align:left;padding-left:4px;min-width:70px"],["길이(mm)","width:142px;flex-shrink:0"],["폭(mm)","width:142px;flex-shrink:0"],["수량","width:54px;flex-shrink:0"],["색상","width:28px;flex-shrink:0"],["","width:20px;flex-shrink:0"]].forEach(([t,s])=>{
     const sp=document.createElement("span");sp.textContent=t;sp.style.cssText=s;hdr.appendChild(sp);
   });
   // 테이블
@@ -586,23 +596,29 @@ function rebuildSec(pi){
 function appendCRow(pi,ji,tbl){
   const pt=parts[pi][ji];
   const row=document.createElement("div");row.className="crow";
-  // 이름
-  const n=mkInp("ci","text",pt.name||"","조각명",v=>{parts[pi][ji].name=v;schedCalc();},"name");n.style.flex="1";
+  // 이름 (flex:1)
+  const n=mkInp("ci","text",pt.name||"","조각명",v=>{parts[pi][ji].name=v;schedCalc();},"name");
+  n.style.flex="1";
   n.addEventListener("keydown",e=>cutKey(e,pi,ji,"name"));
-  // 길이
-  const l=mkInp("ci","number",pt.length||"","mm",v=>{parts[pi][ji].length=+v;schedCalc();chkAddPart(pi,ji);},"length");l.style.width="98px";l.style.flexShrink="0";
+  // 길이 (142px) — input은 저장만, blur에서 자동행 추가 체크
+  const l=mkInp("ci","number",pt.length||"","mm",v=>{parts[pi][ji].length=+v;schedCalc();},"length");
+  l.style.width="142px";
   l.addEventListener("keydown",e=>cutKey(e,pi,ji,"length"));
-  // 폭
-  const w=mkInp("ci","number",pt.width||"","mm",v=>{parts[pi][ji].width=+v;schedCalc();chkAddPart(pi,ji);},"width");w.style.width="98px";w.style.flexShrink="0";
+  l.addEventListener("blur",()=>chkAddPart(pi,ji));
+  // 폭 (142px) — input은 저장만, blur에서 자동행 추가 체크
+  const w=mkInp("ci","number",pt.width||"","mm",v=>{parts[pi][ji].width=+v;schedCalc();},"width");
+  w.style.width="142px";
   w.addEventListener("keydown",e=>cutKey(e,pi,ji,"width"));
-  // 수량
-  const q=mkInp("ci","number",pt.quantity||1,"수량",null,"quantity");q.min="1";q.style.width="54px";q.style.flexShrink="0";
+  w.addEventListener("blur",()=>chkAddPart(pi,ji));
+  // 수량 (54px)
+  const q=mkInp("ci","number",pt.quantity||1,"수량",null,"quantity");
+  q.min="1";q.style.width="54px";
   q.addEventListener("input",()=>{parts[pi][ji].quantity=Math.max(1,+q.value);schedCalc();});
   q.addEventListener("keydown",e=>cutKey(e,pi,ji,"quantity"));
-  // 색상
-  const cb=document.createElement("div");cb.className="cbtn";cb.style.cssText=`width:28px;height:28px;background:${pt.color}`;
+  // 색상 (28px)
+  const cb=document.createElement("div");cb.className="cbtn";cb.style.cssText=`width:28px;height:28px;flex-shrink:0;background:${pt.color}`;
   cb.addEventListener("click",()=>{_cTgt={pi,ji};document.getElementById("colorMo").classList.add("on");});
-  // 삭제
+  // 삭제 (20px)
   const del=mkBtn("delbtn","×",()=>removePart(pi,ji));
   row.append(n,l,w,q,cb,del);tbl.appendChild(row);
 }
@@ -616,32 +632,30 @@ function removePart(pi,ji){
   if(parts[pi].length<=1){toast("조각은 최소 1개 필요합니다");return;}
   parts[pi].splice(ji,1);rebuildSec(pi);schedCalc();
 }
-// PC앱 check_and_add_row: 마지막 행 길이+폭 입력 시 자동 새 행
+// 마지막 행 길이+폭 모두 입력(blur) 완료 시에만 새 행 자동 추가
 function chkAddPart(pi,ji){
   if(ji!==parts[pi].length-1)return;
   const pt=parts[pi][ji];
   if(parseFloat(pt.length)>0&&parseFloat(pt.width)>0)addPart(pi);
 }
-// PC앱 _make_enter: Enter → 같은 열 다음 행 또는 같은 행 다음 열
+// Enter 키: 같은 열의 다음 행으로 이동 (마지막 행이면 다음 열로)
 function cutKey(e,pi,ji,col){
-  if(e.key!=="Enter")return;e.preventDefault();
+  if(e.key!=="Enter")return;
+  e.preventDefault();
   const t=document.getElementById(`ct_${pi}`);if(!t)return;
   const rows=Array.from(t.querySelectorAll(".crow"));
   const colOrder=["name","length","width","quantity"];
   const curIdx=colOrder.indexOf(col);
-  // 다음 행의 같은 열로 이동
-  if(ji<parts[pi].length-1){
-    const inp=rows[ji+1].querySelector(`input[data-col="${col}"]`);if(inp){inp.focus();inp.select();}
+  if(ji<rows.length-1){
+    // 다음 행의 같은 열
+    const inp=rows[ji+1].querySelector(`input[data-col="${col}"]`);
+    if(inp){inp.focus();inp.select();}
   } else if(curIdx<colOrder.length-1){
-    // 같은 행의 다음 열로
-    const inp=rows[ji].querySelector(`input[data-col="${colOrder[curIdx+1]}"]`);if(inp){inp.focus();inp.select();}
-  } else {
-    // 마지막 셀 — 자동추가된 새 행 첫 셀
-    const pt=parts[pi][ji];
-    if(parseFloat(pt.length)>0&&parseFloat(pt.width)>0&&rows.length>ji+1){
-      const inp=rows[ji+1].querySelector(`input[data-col="name"]`);if(inp){inp.focus();inp.select();}
-    }
+    // 같은 행의 다음 열
+    const inp=rows[ji].querySelector(`input[data-col="${colOrder[curIdx+1]}"]`);
+    if(inp){inp.focus();inp.select();}
   }
+  // 마지막 셀 Enter 시 blur 이벤트가 chkAddPart를 트리거하므로 별도 처리 불필요
 }
 
 /* === DOM 헬퍼 === */
