@@ -259,6 +259,8 @@ body{font-family:var(--font);background:var(--bg);color:var(--tx);height:100vh;o
   </div></div>
   <div class="mi">설정<div class="md">
     <div class="mdi" onclick="openUsers()">👤 아이디 추가/변경</div>
+    <div class="mds"></div>
+    <div class="mdi" onclick="openGists()">🐙 GitHub Gists 설정</div>
   </div></div>
   <div class="mi">내보내기<div class="md">
     <div class="mdi" onclick="exportPDF()">📄 PDF 저장</div>
@@ -289,20 +291,25 @@ body{font-family:var(--font);background:var(--bg);color:var(--tx);height:100vh;o
     <input class="ninp" id="siteName" placeholder="현장명 입력" oninput="schedCalc()">
   </div>
 
-  <!-- Film 헤더 -->
-  <div class="slbl">Film (원자재)<span class="sadd" onclick="addPanel()">+ Film 추가</span></div>
+  <!-- Film(원자재) 헤더 -->
+  <div style="border:1px solid var(--ln);border-radius:7px;padding:10px 10px 6px;margin-bottom:13px;background:var(--fr)">
+  <div class="slbl" style="margin-bottom:7px">📦 원자재 (Film)<span class="sadd" onclick="addPanel()">+ Film 추가</span></div>
   <div class="thdr">
     <span style="width:28px">NO</span>
-    <span style="flex:1;text-align:left;padding-left:4px">이름</span>
-    <span style="width:80px">길이(mm)</span>
-    <span style="width:80px">폭(mm)</span>
+    <span style="width:90px;text-align:left;padding-left:4px">이름</span>
+    <span style="width:100px">길이(mm)</span>
+    <span style="width:100px">폭(mm)</span>
     <span style="width:32px">Grain</span>
     <span style="width:20px"></span>
   </div>
-  <div class="ptbl" id="panelTbl"></div>
+  <div class="ptbl" id="panelTbl" style="margin-bottom:0"></div>
+  </div>
 
   <!-- 조각 섹션들 -->
+  <div style="border:1px solid var(--ln);border-radius:7px;padding:10px 10px 6px;background:var(--fr)">
+  <div class="slbl" style="margin-bottom:7px">✂️ 재단 조각 (Film별)</div>
   <div id="partsSecs"></div>
+  </div>
 
 </div>
 <div id="BB">
@@ -356,6 +363,35 @@ body{font-family:var(--font);background:var(--bg);color:var(--tx);height:100vh;o
     <button class="abtn" style="font-size:12px" onclick="upsertUser()">추가 / 변경 적용</button>
   </div>
   <div class="mbs"><button class="mb_ s" onclick="cmo('usersMo')">닫기</button></div>
+</div></div>
+
+<!-- GitHub Gists 설정 -->
+<div class="mo" id="gistsMo">
+<div class="mc" style="max-width:420px">
+  <div class="mct">🐙 GitHub Gists 설정<button class="mcl" onclick="cmo('gistsMo')">✕</button></div>
+  <p style="font-size:11px;color:#868E96;margin-bottom:12px">GitHub Gist를 통해 데이터를 클라우드에 저장하고 불러올 수 있습니다.</p>
+  <div style="background:var(--cv);border:1px solid var(--ln);border-radius:6px;padding:13px;margin-bottom:10px">
+    <div class="mf">
+      <label>GitHub 아이디 (Username)</label>
+      <input id="gistUserId" placeholder="예: octocat" autocomplete="off">
+    </div>
+    <div class="mf">
+      <label>Personal Access Token</label>
+      <input type="password" id="gistToken" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx" autocomplete="off">
+      <div style="font-size:10px;color:#868E96;margin-top:3px">⚠️ gist 권한이 있는 토큰이 필요합니다. 토큰은 이 기기에만 저장됩니다.</div>
+    </div>
+    <div class="mf">
+      <label>Gist ID (선택 — 기존 Gist 불러오기)</label>
+      <input id="gistId" placeholder="예: 8a9b2c3d4e5f... (비워두면 새 Gist 생성)" autocomplete="off">
+    </div>
+    <button class="abtn" style="font-size:12px;margin-top:4px" onclick="saveGistSettings()">✅ 저장</button>
+  </div>
+  <div id="gistStatus" style="font-size:11px;color:#868E96;min-height:16px;margin-bottom:4px"></div>
+  <div style="display:flex;gap:7px;margin-bottom:4px">
+    <button class="abtn" style="font-size:12px" onclick="gistSave()">☁️ Gist에 저장</button>
+    <button class="abtn sec" style="font-size:12px" onclick="gistLoad()">📥 Gist에서 불러오기</button>
+  </div>
+  <div class="mbs"><button class="mb_ s" onclick="cmo('gistsMo')">닫기</button></div>
 </div></div>
 
 <!-- 백업 -->
@@ -456,13 +492,13 @@ function renderPanelTbl(){
     // NO 버튼
     const nb=mkBtn("nobtn",i+1,()=>scrollToSec(i));nb.style.width="28px";
     // 이름
-    const n=mkInp("ci","text",p.name||"","Film명",v=>{panels[i].name=v;updSecTitle(i);schedCalc();},"name");n.style.flex="1";
+    const n=mkInp("ci","text",p.name||"","Film명",v=>{panels[i].name=v;updSecTitle(i);schedCalc();},"name");n.style.width="90px";n.style.flexShrink="0";
     n.addEventListener("keydown",e=>panKey(e,i,"name"));
     // 길이
-    const l=mkInp("ci","number",p.length||"","길이",v=>{panels[i].length=+v;if(v&&!panels[i].width){panels[i].width=1220;renderPanelTbl();}schedCalc();},"length");l.style.width="80px";
+    const l=mkInp("ci","number",p.length||"","길이",v=>{panels[i].length=+v;if(v&&!panels[i].width){panels[i].width=1220;renderPanelTbl();}schedCalc();},"length");l.style.width="100px";
     l.addEventListener("keydown",e=>panKey(e,i,"length"));
     // 폭
-    const w=mkInp("ci","number",p.width||"","폭",v=>{panels[i].width=+v;chkAddPanel(i);schedCalc();},"width");w.style.width="80px";
+    const w=mkInp("ci","number",p.width||"","폭",v=>{panels[i].width=+v;chkAddPanel(i);schedCalc();},"width");w.style.width="100px";
     w.addEventListener("keydown",e=>panKey(e,i,"width"));
     // Grain
     const cb=document.createElement("input");cb.type="checkbox";cb.className="gcb";cb.style.width="32px";cb.checked=p.grain;
@@ -473,11 +509,18 @@ function renderPanelTbl(){
   });
 }
 function panKey(e,pi,col){
-  if(e.key!=="Enter")return;e.preventDefault();
+  if(e.key!=="Enter"&&e.key!=="Tab")return;
+  if(e.key==="Tab")return; // Tab은 기본동작 허용
+  e.preventDefault();
+  const colOrder=["name","length","width"];
+  const curIdx=colOrder.indexOf(col);
   const rows=document.querySelectorAll("#panelTbl .prow");
-  if(pi<panels.length-1){
-    const inp=rows[pi+1].querySelector(`input[data-col="${col}"]`);if(inp){inp.focus();inp.select();}
-  }else if(col==="width"){
+  // 같은 행의 다음 열로 이동
+  if(curIdx<colOrder.length-1){
+    const inp=rows[pi].querySelector(`input[data-col="${colOrder[curIdx+1]}"]`);if(inp){inp.focus();inp.select();}
+  } else if(pi<panels.length-1){
+    const inp=rows[pi+1].querySelector(`input[data-col="name"]`);if(inp){inp.focus();inp.select();}
+  } else {
     setTimeout(()=>{const s=document.getElementById(`cs_${pi}`);if(s){const inp=s.querySelector("input.ci");if(inp){inp.focus();inp.select();}}},50);
   }
 }
@@ -511,7 +554,7 @@ function buildSec(pi){
   tr.append(no,nm,ab);
   // 헤더
   const hdr=document.createElement("div");hdr.className="thdr";
-  [["이름","flex:1;text-align:left;padding-left:4px"],["길이(mm)","width:78px"],["폭(mm)","width:78px"],["수량","width:54px"],["색상","width:28px"],["","width:20px"]].forEach(([t,s])=>{
+  [["이름","flex:1;text-align:left;padding-left:4px;min-width:70px"],["길이(mm)","width:78px"],["폭(mm)","width:78px"],["수량","width:54px"],["색상","width:28px"],["","width:20px"]].forEach(([t,s])=>{
     const sp=document.createElement("span");sp.textContent=t;sp.style.cssText=s;hdr.appendChild(sp);
   });
   // 테이블
@@ -537,7 +580,7 @@ function appendCRow(pi,ji,tbl){
   const w=mkInp("ci","number",pt.width||"","mm",v=>{parts[pi][ji].width=+v;schedCalc();chkAddPart(pi,ji);},"width");w.style.width="78px";
   w.addEventListener("keydown",e=>cutKey(e,pi,ji,"width"));
   // 수량
-  const q=mkInp("ci","number",pt.quantity||1,"","v",1,"54px");q.min="1";q.style.width="54px";
+  const q=mkInp("ci","number",pt.quantity||1,"수량",null,"quantity");q.min="1";q.style.width="54px";
   q.addEventListener("input",()=>{parts[pi][ji].quantity=Math.max(1,+q.value);schedCalc();});
   q.addEventListener("keydown",e=>cutKey(e,pi,ji,"quantity"));
   // 색상
@@ -563,17 +606,24 @@ function chkAddPart(pi,ji){
   const pt=parts[pi][ji];
   if(parseFloat(pt.length)>0&&parseFloat(pt.width)>0)addPart(pi);
 }
-// PC앱 _make_enter: Enter → 같은 열 다음 행
+// PC앱 _make_enter: Enter → 같은 열 다음 행 또는 같은 행 다음 열
 function cutKey(e,pi,ji,col){
   if(e.key!=="Enter")return;e.preventDefault();
   const t=document.getElementById(`ct_${pi}`);if(!t)return;
   const rows=Array.from(t.querySelectorAll(".crow"));
+  const colOrder=["name","length","width","quantity"];
+  const curIdx=colOrder.indexOf(col);
+  // 다음 행의 같은 열로 이동
   if(ji<parts[pi].length-1){
     const inp=rows[ji+1].querySelector(`input[data-col="${col}"]`);if(inp){inp.focus();inp.select();}
-  }else{
+  } else if(curIdx<colOrder.length-1){
+    // 같은 행의 다음 열로
+    const inp=rows[ji].querySelector(`input[data-col="${colOrder[curIdx+1]}"]`);if(inp){inp.focus();inp.select();}
+  } else {
+    // 마지막 셀 — 자동추가된 새 행 첫 셀
     const pt=parts[pi][ji];
     if(parseFloat(pt.length)>0&&parseFloat(pt.width)>0&&rows.length>ji+1){
-      const inp=rows[ji+1].querySelector(`input[data-col="${col}"]`);if(inp){inp.focus();inp.select();}
+      const inp=rows[ji+1].querySelector(`input[data-col="name"]`);if(inp){inp.focus();inp.select();}
     }
   }
 }
@@ -622,7 +672,8 @@ function calcLayout(){
     const r=bestFit({length:+p.length,width:+p.width,name:p.name},ps,p.grain);
     results.push({panel:{...p,length:+p.length,width:+p.width},placed:r.placed,remaining:r.remaining});
   });
-  drawCV();renderFTabs();updIB();
+  if(curFilm>=results.length)curFilm=Math.max(0,results.length-1);
+  renderFTabs();drawCV();updIB();
 }
 function schedCalc(){clearTimeout(calcT);calcT=setTimeout(calcLayout,200);}
 
@@ -639,18 +690,24 @@ function initCanvas(){
   cv.addEventListener("touchmove",e=>{if(e.touches.length===1&&drag){cvX+=e.touches[0].clientX-drag.x;cvY+=e.touches[0].clientY-drag.y;drag={x:e.touches[0].clientX,y:e.touches[0].clientY};drawCV();}else if(e.touches.length===2&&pinch){const d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);cvS*=d/pinch;pinch=d;drawCV();}e.preventDefault();},{passive:false});
   cv.addEventListener("touchend",()=>{drag=null;pinch=null;},{passive:true});
 }
-function resizeCV(){const w=document.getElementById("CW");cv.width=w.clientWidth;cv.height=w.clientHeight;}
+function resizeCV(){const w=document.getElementById("CW");const cw=w.clientWidth,ch=w.clientHeight;if(cw>0)cv.width=cw;if(ch>0)cv.height=ch;}
 function drawCV(){
   ctx.clearRect(0,0,cv.width,cv.height);ctx.fillStyle="#F1F3F5";ctx.fillRect(0,0,cv.width,cv.height);
-  if(!results.length||curFilm>=results.length){
+  if(!results.length){
     ctx.fillStyle="#ADB5BD";ctx.font="13px 맑은 고딕";ctx.textAlign="center";
     ctx.fillText("데이터 없음 — 입력 후 자동 계산됩니다",cv.width/2,cv.height/2);return;
   }
+  // curFilm 범위 보정
+  if(curFilm>=results.length)curFilm=results.length-1;
+  if(curFilm<0)curFilm=0;
   const res=results[curFilm],panel=res.panel;
-  const H=Math.max(300,Math.round(cv.width*panel.width/panel.length*.7)+80);
-  if(cv.height<H)cv.height=H;
-  const pad=40,scale=Math.min((cv.width-pad*2)/panel.length,(cv.height-pad*2-30)/panel.width)*cvS;
-  const ox=(cv.width-panel.length*scale)/2+cvX,oy=(cv.height-panel.width*scale)/2+cvY+15;
+  if(!panel||!panel.length||!panel.width){
+    ctx.fillStyle="#ADB5BD";ctx.font="13px 맑은 고딕";ctx.textAlign="center";
+    ctx.fillText("Film 치수를 입력하세요",cv.width/2,cv.height/2);return;
+  }
+  const pad=40,cw=cv.width,ch=cv.height;
+  const scale=Math.min((cw-pad*2)/panel.length,(ch-pad*2-30)/panel.width)*cvS;
+  const ox=(cw-panel.length*scale)/2+cvX,oy=(ch-panel.width*scale)/2+cvY+15;
   ctx.fillStyle="#FFF";ctx.strokeStyle="#495057";ctx.lineWidth=1.5;
   ctx.fillRect(ox,oy,panel.length*scale,panel.width*scale);ctx.strokeRect(ox,oy,panel.length*scale,panel.width*scale);
   ctx.fillStyle="#9BA3B2";ctx.font="10px 'Courier New'";ctx.textAlign="center";
@@ -672,7 +729,7 @@ function drawCV(){
     }
   });
   const usedLen=res.placed.length?Math.max(...res.placed.map(p=>p.x+p.length)):0,remLen=Math.max(0,panel.length-usedLen);
-  const bx=cv.width-138,by=cv.height-78,bw2=128,bh2=68;
+  const bx=cw-138,by=ch-78,bw2=128,bh2=68;
   ctx.fillStyle="rgba(30,33,48,.9)";ctx.strokeStyle="#2E3448";ctx.lineWidth=1;ctx.fillRect(bx,by,bw2,bh2);ctx.strokeRect(bx,by,bw2,bh2);
   ctx.fillStyle="#9BA3B2";ctx.font="9px 'Courier New'";ctx.textAlign="left";
   [`총길이: ${fd(panel.length/1000)}m`,`사용: ${fd(usedLen/1000)}m`,`잔여: ${fd(remLen/1000)}m`,`조각: ${res.placed.length}개`].forEach((l,i)=>ctx.fillText(l,bx+7,by+12+i*14));
@@ -805,6 +862,65 @@ async function delUser(uid){
   const users=await window._fbGetUsers();
   if(Object.keys(users).length<=1){toast("최소 1개 계정이 필요합니다");return;}
   delete users[uid];await window._fbSaveUsers(users);toast("삭제됐습니다");openUsers();
+}
+
+/* === GitHub Gists === */
+function openGists(){
+  document.getElementById("gistsMo").classList.add("on");
+  document.getElementById("gistUserId").value=localStorage.getItem("gist_uid")||"";
+  document.getElementById("gistToken").value=localStorage.getItem("gist_token")||"";
+  document.getElementById("gistId").value=localStorage.getItem("gist_id")||"";
+  document.getElementById("gistStatus").textContent="";
+}
+function saveGistSettings(){
+  const uid=document.getElementById("gistUserId").value.trim();
+  const token=document.getElementById("gistToken").value.trim();
+  const gid=document.getElementById("gistId").value.trim();
+  if(!uid||!token){toast("아이디와 토큰을 입력하세요");return;}
+  localStorage.setItem("gist_uid",uid);
+  localStorage.setItem("gist_token",token);
+  localStorage.setItem("gist_id",gid);
+  document.getElementById("gistStatus").textContent="✅ 설정이 저장되었습니다.";
+  toast("✅ GitHub Gists 설정 저장됨");
+}
+async function gistSave(){
+  const token=localStorage.getItem("gist_token")||"";
+  const gid=localStorage.getItem("gist_id")||"";
+  if(!token){toast("먼저 토큰을 설정하세요");return;}
+  const st=document.getElementById("gistStatus");
+  st.textContent="☁️ Gist에 저장 중...";
+  const data=getPD();const content=JSON.stringify(data,null,2);
+  const site=data.site_name||"cutting_s";
+  const filename=`${site}_data.json`;
+  try{
+    let res,url="https://api.github.com/gists",method="POST";
+    const body={description:`cutting_s 재단 데이터 (${new Date().toLocaleString("ko-KR")})`,public:false,files:{[filename]:{content}}};
+    if(gid){url=`https://api.github.com/gists/${gid}`;method="PATCH";}
+    res=await fetch(url,{method,headers:{"Authorization":`token ${token}`,"Content-Type":"application/json"},body:JSON.stringify(body)});
+    if(!res.ok)throw new Error(`HTTP ${res.status}`);
+    const d=await res.json();
+    if(!gid){localStorage.setItem("gist_id",d.id);document.getElementById("gistId").value=d.id;}
+    st.textContent=`✅ 저장 완료: ${new Date().toLocaleString("ko-KR")}`;
+    toast("✅ GitHub Gist 저장 완료");
+  }catch(e){st.textContent="❌ 저장 실패: "+e.message;toast("❌ Gist 저장 실패");}
+}
+async function gistLoad(){
+  const token=localStorage.getItem("gist_token")||"";
+  const gid=localStorage.getItem("gist_id")||"";
+  const st=document.getElementById("gistStatus");
+  if(!token||!gid){toast("토큰과 Gist ID를 설정하세요");return;}
+  if(!confirm("Gist에서 불러오면 현재 내용이 교체됩니다. 계속할까요?"))return;
+  st.textContent="📥 불러오는 중...";
+  try{
+    const res=await fetch(`https://api.github.com/gists/${gid}`,{headers:{"Authorization":`token ${token}`}});
+    if(!res.ok)throw new Error(`HTTP ${res.status}`);
+    const d=await res.json();
+    const fileKey=Object.keys(d.files)[0];
+    const raw=d.files[fileKey].content;
+    loadPD(JSON.parse(raw));
+    st.textContent=`✅ 불러오기 완료: ${new Date().toLocaleString("ko-KR")}`;
+    toast("✅ GitHub Gist 불러오기 완료");
+  }catch(e){st.textContent="❌ 불러오기 실패: "+e.message;toast("❌ Gist 불러오기 실패");}
 }
 
 /* === Firebase === */
