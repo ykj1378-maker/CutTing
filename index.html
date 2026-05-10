@@ -697,11 +697,11 @@ function appendCRow(pi,ji,tbl){
   q.min="1";q.style.width="50px";
   q.addEventListener("input",()=>{parts[pi][ji].quantity=Math.max(1,+q.value);schedCalc();});
   q.addEventListener("keydown",e=>cutKey(e,pi,ji,"quantity"));
-  // 색상 (28px)
-  const cb=document.createElement("div");cb.className="cbtn";cb.style.cssText=`width:28px;height:28px;flex-shrink:0;background:${pt.color}`;
+  // 색상 (28px) — Tab 순환 제외
+  const cb=document.createElement("div");cb.className="cbtn";cb.tabIndex=-1;cb.style.cssText=`width:28px;height:28px;flex-shrink:0;background:${pt.color}`;
   cb.addEventListener("click",()=>{_cTgt={pi,ji};document.getElementById("colorMo").classList.add("on");});
-  // 삭제 (20px)
-  const del=mkBtn("delbtn","×",()=>removePart(pi,ji));
+  // 삭제 (20px) — Tab 순환 제외
+  const del=mkBtn("delbtn","×",()=>removePart(pi,ji));del.tabIndex=-1;
   row.append(n,l,w,q,cb,del);tbl.appendChild(row);
 }
 
@@ -774,6 +774,15 @@ function cutKey(e,pi,ji,col){
     e.preventDefault();
     const inp=rows[ji].querySelector('input[data-col="quantity"]');
     if(inp){inp.focus();inp.select();}
+    return;
+  }
+  // Tab: 수량→다음 행 이름 (색상·삭제 셀 건너뜀)
+  if(isTab&&col==="quantity"){
+    e.preventDefault();
+    if(ji<rows.length-1){
+      const inp=rows[ji+1].querySelector('input[data-col="name"]');
+      if(inp){inp.focus();inp.select();}
+    }
     return;
   }
   if(!isEnter)return;
