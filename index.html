@@ -111,7 +111,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--tx);height:100vh;o
 #ML{flex:1;display:flex;overflow:hidden}
 
 /* 왼쪽 입력 */
-#LP{width:555px;min-width:320px;flex-shrink:0;background:var(--fr);border-right:1px solid var(--ln);display:flex;flex-direction:column;overflow:hidden}
+#LP{width:420px;min-width:280px;flex-shrink:0;background:var(--fr);border-right:1px solid var(--ln);display:flex;flex-direction:column;overflow:hidden}
 #RZ{width:5px;background:var(--ln);cursor:col-resize;flex-shrink:0;transition:background .15s}
 #RZ:hover{background:var(--ac)}
 #RP{flex:1;display:flex;flex-direction:column;background:var(--cv);overflow:hidden}
@@ -284,26 +284,26 @@ body{font-family:var(--font);background:var(--bg);color:var(--tx);height:100vh;o
 
 <!-- 메뉴바 -->
 <div id="MB">
-  <div class="mi" onclick="toggleMenu(this)">파일<div class="md">
-    <div class="mdi" onclick="fbSave()">☁️ 클라우드 저장</div>
-    <div class="mdi" onclick="fbLoad()">☁️ 클라우드 불러오기</div>
-    <div class="mdi" onclick="fbBackups()">🕓 백업 목록</div>
+  <div class="mi" onclick="toggleMenu(this,event)">파일<div class="md">
+    <div class="mdi" onclick="menuAction(fbSave,event)">☁️ 클라우드 저장</div>
+    <div class="mdi" onclick="menuAction(fbLoad,event)">☁️ 클라우드 불러오기</div>
+    <div class="mdi" onclick="menuAction(fbBackups,event)">🕓 백업 목록</div>
     <div class="mds"></div>
-    <div class="mdi" onclick="localSave()">💾 기기 저장</div>
-    <div class="mdi" onclick="localLoad()">📂 기기 열기</div>
+    <div class="mdi" onclick="menuAction(localSave,event)">💾 기기 저장</div>
+    <div class="mdi" onclick="menuAction(localLoad,event)">📂 기기 열기</div>
   </div></div>
-  <div class="mi" onclick="toggleMenu(this)">보기<div class="md">
-    <div class="mdi" onclick="openStats()">📊 통계</div>
-    <div class="mdi" onclick="openFull()">🔲 Full 보기</div>
+  <div class="mi" onclick="toggleMenu(this,event)">보기<div class="md">
+    <div class="mdi" onclick="menuAction(openStats,event)">📊 통계</div>
+    <div class="mdi" onclick="menuAction(openFull,event)">🔲 Full 보기</div>
   </div></div>
-  <div class="mi" onclick="toggleMenu(this)">설정<div class="md">
-    <div class="mdi" onclick="openUsers()">👤 아이디 추가/변경</div>
+  <div class="mi" onclick="toggleMenu(this,event)">설정<div class="md">
+    <div class="mdi" onclick="menuAction(openUsers,event)">👤 아이디 추가/변경</div>
     <div class="mds"></div>
-    <div class="mdi" onclick="openGists()">🐙 GitHub Gists 설정</div>
+    <div class="mdi" onclick="menuAction(openGists,event)">🐙 GitHub Gists 설정</div>
   </div></div>
-  <div class="mi">내보내기<div class="md">
-    <div class="mdi" onclick="exportPDF()">📄 PDF 저장</div>
-    <div class="mdi" onclick="exportExcel()">📊 Excel 저장</div>
+  <div class="mi" onclick="toggleMenu(this,event)">내보내기<div class="md">
+    <div class="mdi" onclick="menuAction(exportPDF,event)">📄 PDF 저장</div>
+    <div class="mdi" onclick="menuAction(exportExcel,event)">📊 Excel 저장</div>
   </div></div>
   <div class="mbr">
     <span id="cuser"></span>
@@ -461,7 +461,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--tx);height:100vh;o
 
 <!-- Full 보기 -->
 <div class="mo" id="fullMo" style="background:rgba(0,0,0,.78)">
-<div class="mc" style="width:95vw;max-width:none;height:92vh;max-height:none;padding:0;display:flex;flex-direction:column">
+<div class="mc" style="width:100vw;max-width:none;height:100vh;max-height:none;padding:0;display:flex;flex-direction:column;border-radius:0">
   <div style="height:38px;background:var(--fr);border-bottom:1px solid var(--ln);border-radius:10px 10px 0 0;display:flex;align-items:center;gap:5px;padding:0 9px;flex-shrink:0">
     <span style="font-size:12px;font-weight:700;color:var(--hd)">전체 보기</span>
     <div class="ftabs" id="fullTabs" style="margin-left:7px"></div>
@@ -469,7 +469,6 @@ body{font-family:var(--font);background:var(--bg);color:var(--tx);height:100vh;o
     <button class="zvbtn" onclick="fzoom(0.8)">−</button>
     <button class="zvbtn" onclick="fresetZoom()">⟳</button>
     <button id="lineModeBtn" onclick="openLineMode()" title="라인모드 (프로젝터용)" style="font-size:11px;width:auto;padding:0 10px;background:#0B7285;color:#fff;border:1px solid #0B7285;border-radius:5px;height:27px;cursor:pointer;font-weight:700;flex-shrink:0">☰ Line Mode</button>
-    <button class="zvbtn" id="gridModeBtn" onclick="toggleGridMode()" title="그리드" style="font-size:11px;width:auto;padding:0 7px;gap:3px">⊞ 그리드</button>
     <button class="abtn sec" style="flex:0;padding:4px 11px;font-size:11px;margin-left:4px;white-space:nowrap;line-height:1.4;display:flex;align-items:center;gap:3px" onclick="cmo('fullMo')">✕ 닫기</button>
   </div>
   <canvas id="fullCv"></canvas>
@@ -483,8 +482,12 @@ body{font-family:var(--font);background:var(--bg);color:var(--tx);height:100vh;o
   <div id="lmFocusLbl" style="position:absolute;left:12px;bottom:10px;font-size:11px;font-weight:700;color:#74C0FC;font-family:'맑은 고딕',sans-serif;pointer-events:none">전체보기  |  ▶ 로 이동</div>
   <!-- 제어판 토글 버튼 (우상단) -->
   <button id="lmCtrlBtn" onclick="lmToggleCtrl()" style="position:absolute;right:10px;top:10px;background:#1A1D23;color:#ADB5BD;border:none;border-radius:5px;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;font-family:'맑은 고딕',sans-serif">☰ 제어판</button>
-  <!-- 제어판 패널 (우상단 드롭다운) -->
-  <div id="lmCtrl" style="position:absolute;right:10px;top:40px;width:268px;background:#16181E;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,.6);z-index:10;overflow:hidden">
+  <!-- 제어판 패널 (드래그 이동 가능) -->
+  <div id="lmCtrl" style="position:absolute;right:10px;top:40px;width:268px;background:#16181E;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,.6);z-index:10;overflow:hidden;cursor:default">
+    <!-- 드래그 핸들 -->
+    <div id="lmCtrlHandle" style="height:22px;background:#1E2128;border-bottom:1px solid #2A2D36;display:flex;align-items:center;padding:0 8px;cursor:grab;user-select:none">
+      <span style="font-size:9px;color:#6B7280;letter-spacing:1px">⠿ 제어판 (드래그로 이동)</span>
+    </div>
     <!-- 섹션1: 라인 색상 -->
     <div style="padding:8px 10px 0">
       <div style="font-size:9px;font-weight:700;color:#6B7280;margin-bottom:3px">● 라인 색상</div>
@@ -586,6 +589,8 @@ window.addEventListener("DOMContentLoaded",()=>{
   document.getElementById("remPw").checked=rp;
   if(ri) document.getElementById("lUid").value=localStorage.getItem("cut_uid")||"";
   ["lUid","lPwd"].forEach(id=>document.getElementById(id).addEventListener("keydown",e=>{if(e.key==="Enter")doLogin();}));
+  /* 앱 최초 실행 시 전체창 */
+  try{ if(window.screen && window.outerWidth < window.screen.availWidth) window.moveTo(0,0),window.resizeTo(window.screen.availWidth, window.screen.availHeight); }catch(e){}
   /* 메뉴 외부 클릭 시 닫기 */
   document.addEventListener("click",e=>{
     if(!e.target.closest(".mi"))
@@ -595,10 +600,17 @@ window.addEventListener("DOMContentLoaded",()=>{
 });
 
 /* === 메뉴 토글 === */
-function toggleMenu(el){
-  const isOpen=el.classList.contains("open");
+function toggleMenu(el, e){
+  if(e) e.stopPropagation();
+  const isOpen = el.classList.contains("open");
   document.querySelectorAll(".mi.open").forEach(m=>m.classList.remove("open"));
   if(!isOpen) el.classList.add("open");
+}
+function menuAction(fn, e){
+  /* 메뉴 항목 클릭 시 메뉴 닫고 해당 함수 실행 */
+  if(e) e.stopPropagation();
+  document.querySelectorAll(".mi.open").forEach(m=>m.classList.remove("open"));
+  if(typeof fn === "function") fn();
 }
 
 /* === 로그인 === */
@@ -1314,7 +1326,28 @@ function openLineMode(){
   const crb=document.getElementById("lmCrBtn");
   crb.textContent="○ 색회전  OFF";crb.style.background="#1E2128";crb.style.color="#6B7280";
   // 제어판 표시
-  lmCtrlVisible=true;document.getElementById("lmCtrl").style.display="block";
+  lmCtrlVisible=true;
+  const ctrl=document.getElementById("lmCtrl");
+  ctrl.style.display="block";
+  /* 제어판 드래그 초기화 — 매번 리셋 */
+  ctrl.style.right="10px"; ctrl.style.top="40px"; ctrl.style.left=""; ctrl.style.bottom="";
+  const handle=document.getElementById("lmCtrlHandle");
+  handle.onmousedown=function(ev){
+    ev.preventDefault();
+    const rect=ctrl.getBoundingClientRect();
+    let ox=ev.clientX-rect.left, oy=ev.clientY-rect.top;
+    handle.style.cursor="grabbing";
+    function onMove(e){
+      let nx=e.clientX-ox, ny=e.clientY-oy;
+      nx=Math.max(0,Math.min(window.innerWidth-ctrl.offsetWidth,nx));
+      ny=Math.max(0,Math.min(window.innerHeight-ctrl.offsetHeight,ny));
+      ctrl.style.left=nx+"px"; ctrl.style.top=ny+"px";
+      ctrl.style.right="auto";
+    }
+    function onUp(){ handle.style.cursor="grab"; document.removeEventListener("mousemove",onMove); document.removeEventListener("mouseup",onUp); }
+    document.addEventListener("mousemove",onMove);
+    document.addEventListener("mouseup",onUp);
+  };
   // 키보드 이벤트
   document.addEventListener("keydown",lmKeyDown);
   setTimeout(()=>{
