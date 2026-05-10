@@ -413,6 +413,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--tx);height:100vh;o
     <button class="zvbtn" onclick="fzoom(0.8)">−</button>
     <button class="zvbtn" onclick="fresetZoom()">⟳</button>
     <button class="zvbtn" id="lineModeBtn" onclick="toggleLineMode()" title="선 모드" style="font-size:11px;width:auto;padding:0 7px;gap:3px">☰ 선</button>
+    <button class="zvbtn" id="gridModeBtn" onclick="toggleGridMode()" title="그리드" style="font-size:11px;width:auto;padding:0 7px;gap:3px">⊞ 그리드</button>
     <button class="abtn sec" style="flex:0;padding:4px 11px;font-size:11px;margin-left:4px;white-space:nowrap;line-height:1.4;display:flex;align-items:center;gap:3px" onclick="cmo('fullMo')">✕ 닫기</button>
   </div>
   <canvas id="fullCv"></canvas>
@@ -444,8 +445,9 @@ function tod(){return new Date().toISOString().split("T")[0];}
 let panels=[],parts=[],results=[];
 let curFilm=0,cvS=1,cvX=0,cvY=0,fS=1,fX=0,fY=0,fF=0;
 let calcT=null,CU="",_cTgt={pi:-1,ji:-1};
-let lineMode=false;
-let _sumBox=null; // 요약 박스 캔버스 좌표 (클릭 감지용)
+let lineMode=false,gridMode=false;
+let _sumBox=null;   // 메인 캔버스 요약 박스 좌표
+let _fSumBox=null;  // Full 캔버스 요약 박스 좌표
 
 /* === 초기화 === */
 window.addEventListener("DOMContentLoaded",()=>{
@@ -923,13 +925,14 @@ function updIB(){
 }
 
 /* === 요약 팝업 === */
-function openSumPopup(){
+function openSumPopup(focusFilm){
   if(!results.length)return;
+  const hi=focusFilm!==undefined?focusFilm:curFilm;
   let html="";
   results.forEach((r,i)=>{
     const u=r.placed.length?Math.max(...r.placed.map(p=>p.x+p.length)):0;
     const rm=Math.max(0,r.panel.length-u),ratio=r.panel.length?(u/r.panel.length*100).toFixed(1):0;
-    html+=`<div style="background:var(--cv);border:1px solid var(--ln);border-radius:6px;padding:10px;margin-bottom:8px${i===curFilm?";border-color:var(--ac)":""}">
+    html+=`<div style="background:var(--cv);border:1px solid var(--ln);border-radius:6px;padding:10px;margin-bottom:8px${i===hi?";border-color:var(--ac);border-width:2px":""}">
       <div style="font-size:12px;font-weight:700;color:var(--hd);margin-bottom:6px">${i+1}. ${esc(r.panel.name||"Film")}</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:11px;margin-bottom:6px">
         <div><span style="color:#868E96">총길이 </span><b>${fd(r.panel.length/1000)}m</b></div>
@@ -957,8 +960,17 @@ function openFull(idx){
   setTimeout(()=>{fcv.width=fcv.offsetWidth;fcv.height=fcv.offsetHeight;fresetZoom();},60);
   let fd2=null,fPinch=null;
   fcv.onmousedown=e=>{fd2={x:e.clientX,y:e.clientY};};
-  fcv.onmousemove=e=>{if(!fd2)return;fX+=e.clientX-fd2.x;fY+=e.clientY-fd2.y;fd2={x:e.clientX,y:e.clientY};drawFull();};
+  fcv.onmousemove=e=>{
+    if(fd2){fX+=e.clientX-fd2.x;fY+=e.clientY-fd2.y;fd2={x:e.clientX,y:e.clientY};drawFull();fcv.style.cursor="grabbing";return;}
+    // cursor 힌트: 요약 박스 위
+    if(_fSumBox){const r=fcv.getBoundingClientRect();const mx=e.clientX-r.left,my=e.clientY-r.top;fcv.style.cursor=(mx>=_fSumBox.bx&&mx<=_fSumBox.bx+_fSumBox.bw2&&my>=_fSumBox.by&&my<=_fSumBox.by+_fSumBox.bh2)?"pointer":"grab";}
+  };
   fcv.onmouseup=()=>{fd2=null;fcv.style.cursor="grab";};
+  fcv.onclick=e=>{
+    if(!_fSumBox||!results.length)return;
+    const r=fcv.getBoundingClientRect();const mx=e.clientX-r.left,my=e.clientY-r.top;
+    if(mx>=_fSumBox.bx&&mx<=_fSumBox.bx+_fSumBox.bw2&&my>=_fSumBox.by&&my<=_fSumBox.by+_fSumBox.bh2)openSumPopup(fF);
+  };
   fcv.onwheel=e=>{e.preventDefault();fS*=e.deltaY<0?1.1:.9;drawFull();};
   // 터치 드래그 / 핀치줌 (passive:false 필요 → addEventListener)
   if(!fcv._touchBound){
@@ -1026,23 +1038,60 @@ function drawFull(){
     });
     fctx.setLineDash([]);fctx.restore();
   }
+  // Grid Mode: 격자선 오버레이
+  if(gridMode){
+    fctx.save();
+    // 적절한 그리드 간격 계산 (100~500mm 단위, 화면에 5~20칸 나오도록)
+    const targets=[50,100,200,250,500,1000];
+    let gStep=targets[0];
+    for(const t of targets){if(panel.length*scale/t*1000>4&&panel.length*scale/t*1000<30){gStep=t;break;}}
+    const gPx=gStep*scale/1000*1000; // mm→px: scale은 px/mm 단위
+    // 실제 scale은 px/mm이므로 gPx = gStep(mm) * scale(px/mm)
+    const gridPx=gStep*scale;
+    fctx.strokeStyle="rgba(100,120,180,0.20)";fctx.lineWidth=.6;fctx.setLineDash([]);
+    // 세로선
+    for(let x=ox;x<=ox+panel.length*scale+.5;x+=gridPx){
+      fctx.beginPath();fctx.moveTo(x,oy);fctx.lineTo(x,oy+panel.width*scale);fctx.stroke();
+    }
+    // 가로선
+    for(let y=oy;y<=oy+panel.width*scale+.5;y+=gridPx){
+      fctx.beginPath();fctx.moveTo(ox,y);fctx.lineTo(ox+panel.length*scale,y);fctx.stroke();
+    }
+    // 눈금 라벨
+    fctx.fillStyle="rgba(100,120,180,0.55)";fctx.font="8px 'Courier New'";fctx.textAlign="center";
+    let xi=0;for(let x=ox;x<=ox+panel.length*scale+.5;x+=gridPx,xi++){
+      if(xi===0)continue;
+      fctx.fillText((gStep*xi)+"",x,oy-3);
+    }
+    fctx.textAlign="right";
+    let yi=0;for(let y=oy;y<=oy+panel.width*scale+.5;y+=gridPx,yi++){
+      if(yi===0)continue;
+      fctx.fillText((gStep*yi)+"",ox-3,y+3);
+    }
+    fctx.restore();
+  }
   // 정보박스 (fcv 기준 — Full 모달 캔버스 크기 사용)
   const usedLen=res.placed.length?Math.max(...res.placed.map(p=>p.x+p.length)):0,remLen=Math.max(0,panel.length-usedLen);
   const fbx=fcv.width-148,fby=fcv.height-92,fbw2=138,fbh2=82;
+  _fSumBox={bx:fbx,by:fby,bw2:fbw2,bh2:fbh2};
   fctx.fillStyle="rgba(30,33,48,.9)";fctx.strokeStyle="#2E3448";fctx.lineWidth=1;fctx.fillRect(fbx,fby,fbw2,fbh2);fctx.strokeRect(fbx,fby,fbw2,fbh2);
   fctx.fillStyle="#9BA3B2";fctx.font="9px 'Courier New'";fctx.textAlign="left";
   [`총길이: ${fd(panel.length/1000)}m`,`총폭: ${fd(panel.width/1000)}m`,`사용: ${fd(usedLen/1000)}m`,`잔여: ${fd(remLen/1000)}m`,`조각: ${res.placed.length}개`].forEach((l,i)=>fctx.fillText(l,fbx+7,fby+13+i*14));
-  // 라인 모드일 때 절단 통계 추가 표시
-  if(lineMode){
-    fctx.fillStyle="rgba(255,255,255,0.22)";fctx.font="8px 'Courier New'";fctx.textAlign="center";
-    fctx.fillText("☰ LINE MODE",fbx+fbw2/2,fby+fbh2-4);
-  }
+  // 클릭 힌트
+  fctx.fillStyle="rgba(255,255,255,0.28)";fctx.font="8px 'Courier New'";fctx.textAlign="center";
+  fctx.fillText("▶ 클릭하면 상세 보기",fbx+fbw2/2,fby+fbh2-4);
 }
 function fzoom(f){fS*=f;drawFull();}function fresetZoom(){fS=1;fX=0;fY=0;drawFull();}
 function toggleLineMode(){
   lineMode=!lineMode;
   const btn=document.getElementById("lineModeBtn");
   if(btn){btn.style.background=lineMode?"var(--bb)":"var(--cv)";btn.style.color=lineMode?"#fff":"var(--tx)";btn.style.borderColor=lineMode?"var(--bb)":"var(--ln)";}
+  drawFull();
+}
+function toggleGridMode(){
+  gridMode=!gridMode;
+  const btn=document.getElementById("gridModeBtn");
+  if(btn){btn.style.background=gridMode?"var(--bb)":"var(--cv)";btn.style.color=gridMode?"#fff":"var(--tx)";btn.style.borderColor=gridMode?"var(--bb)":"var(--ln)";}
   drawFull();
 }
 
