@@ -296,9 +296,9 @@ body{font-family:var(--font);background:var(--bg);color:var(--tx);height:100vh;o
   <div class="slbl" style="margin-bottom:7px">📦 원자재 (Film)<span class="sadd" onclick="addPanel()">+ Film 추가</span></div>
   <div class="thdr" style="gap:3px;padding:4px 5px">
     <span style="width:28px;flex-shrink:0">NO</span>
-    <span style="width:120px;flex-shrink:0;text-align:left;padding-left:4px">이름</span>
-    <span style="width:142px;flex-shrink:0">길이(mm)</span>
-    <span style="width:142px;flex-shrink:0">폭(mm)</span>
+    <span style="width:150px;flex-shrink:0;text-align:left;padding-left:4px">이름</span>
+    <span style="width:110px;flex-shrink:0">길이(mm)</span>
+    <span style="width:110px;flex-shrink:0">폭(mm)</span>
     <span style="width:32px;flex-shrink:0;text-align:center">Grain</span>
     <span style="width:20px;flex-shrink:0"></span>
   </div>
@@ -491,13 +491,13 @@ function renderPanelTbl(){
     const row=document.createElement("div");row.className="prow";
     // NO 버튼
     const nb=mkBtn("nobtn",i+1,()=>scrollToSec(i));nb.style.width="28px";
-    // 이름 (120px)
+    // 이름 (150px)
     const n=mkInp("ci","text",p.name||"","Film명",v=>{panels[i].name=v;updSecTitle(i);schedCalc();},"name");
-    n.style.width="120px";
+    n.style.width="150px";
     n.addEventListener("keydown",e=>panKey(e,i,"name"));
-    // 길이 (142px) — input 이벤트는 데이터 저장만, DOM 재생성 절대 없음
+    // 길이 (110px) — input 이벤트는 데이터 저장만, DOM 재생성 절대 없음
     const l=mkInp("ci","number",p.length||"","길이",v=>{panels[i].length=+v;schedCalc();},"length");
-    l.style.width="142px";
+    l.style.width="110px";
     l.addEventListener("keydown",e=>panKey(e,i,"length"));
     // blur 시 폭 기본값 설정 (포커스가 이미 떠난 후이므로 안전)
     l.addEventListener("blur",()=>{
@@ -508,9 +508,9 @@ function renderPanelTbl(){
         schedCalc();
       }
     });
-    // 폭 (142px)
+    // 폭 (110px)
     const w=mkInp("ci","number",p.width||"","폭",v=>{panels[i].width=+v;schedCalc();},"width");
-    w.style.width="142px";
+    w.style.width="110px";
     w.addEventListener("keydown",e=>panKey(e,i,"width"));
     // 폭 blur — 마지막 행 채워졌을 때만 새 행 추가 (blur 시점 = 입력 완료)
     w.addEventListener("blur",()=>chkAddPanel(i));
@@ -609,7 +609,15 @@ function appendCRow(pi,ji,tbl){
   const w=mkInp("ci","number",pt.width||"","mm",v=>{parts[pi][ji].width=+v;schedCalc();},"width");
   w.style.width="142px";
   w.addEventListener("keydown",e=>cutKey(e,pi,ji,"width"));
-  w.addEventListener("blur",()=>chkAddPart(pi,ji));
+  w.addEventListener("blur",()=>{
+    const wasLast=ji===parts[pi].length-1;
+    chkAddPart(pi,ji);
+    // 마지막 행이 아니거나, 자동추가 조건 미충족 시 → 수량 셀로 포커스
+    if(!wasLast||(parseFloat(parts[pi][ji].length)<=0||parseFloat(parts[pi][ji].width)<=0)){
+      const t=document.getElementById(`ct_${pi}`);
+      if(t){const rows=t.querySelectorAll(".crow");const row=rows[ji];if(row){const q=row.querySelector('input[data-col="quantity"]');if(q){q.focus();q.select();}}}
+    }
+  });
   // 수량 (54px)
   const q=mkInp("ci","number",pt.quantity||1,"수량",null,"quantity");
   q.min="1";q.style.width="54px";
@@ -742,7 +750,7 @@ function drawCV(){
   ctx.fillRect(ox,oy,panel.length*scale,panel.width*scale);ctx.strokeRect(ox,oy,panel.length*scale,panel.width*scale);
   ctx.fillStyle="#9BA3B2";ctx.font="10px 'Courier New'";ctx.textAlign="center";
   ctx.fillText(fd(panel.length/1000)+"m",ox+panel.length*scale/2,oy-8);
-  ctx.save();ctx.translate(ox-10,oy+panel.width*scale/2);ctx.rotate(-Math.PI/2);ctx.fillText(fd(panel.width/1000)+"m",0,0);ctx.restore();
+  ctx.save();ctx.translate(ox-14,oy+panel.width*scale/2);ctx.rotate(-Math.PI/2);ctx.textAlign="center";ctx.fillText(fd(panel.width/1000)+"m",0,0);ctx.restore();
   ctx.strokeStyle="#E03131";ctx.lineWidth=1;ctx.setLineDash([4,2]);
   res.remaining.forEach(([ax,ay,aw,ah])=>{if(aw>1&&ah>1)ctx.strokeRect(ox+ax*scale,oy+ay*scale,aw*scale,ah*scale);});
   ctx.setLineDash([]);
@@ -759,10 +767,10 @@ function drawCV(){
     }
   });
   const usedLen=res.placed.length?Math.max(...res.placed.map(p=>p.x+p.length)):0,remLen=Math.max(0,panel.length-usedLen);
-  const bx=cw-138,by=ch-78,bw2=128,bh2=68;
+  const bx=cw-148,by=ch-92,bw2=138,bh2=82;
   ctx.fillStyle="rgba(30,33,48,.9)";ctx.strokeStyle="#2E3448";ctx.lineWidth=1;ctx.fillRect(bx,by,bw2,bh2);ctx.strokeRect(bx,by,bw2,bh2);
   ctx.fillStyle="#9BA3B2";ctx.font="9px 'Courier New'";ctx.textAlign="left";
-  [`총길이: ${fd(panel.length/1000)}m`,`사용: ${fd(usedLen/1000)}m`,`잔여: ${fd(remLen/1000)}m`,`조각: ${res.placed.length}개`].forEach((l,i)=>ctx.fillText(l,bx+7,by+12+i*14));
+  [`총길이: ${fd(panel.length/1000)}m`,`총폭: ${fd(panel.width/1000)}m`,`사용: ${fd(usedLen/1000)}m`,`잔여: ${fd(remLen/1000)}m`,`조각: ${res.placed.length}개`].forEach((l,i)=>ctx.fillText(l,bx+7,by+13+i*14));
 }
 function renderFTabs(){
   const w=document.getElementById("filmTabs");w.innerHTML="";
@@ -793,11 +801,18 @@ function openFull(idx){
   const ft=document.getElementById("fullTabs");ft.innerHTML="";
   results.forEach((r,i)=>{const b=document.createElement("button");b.className="ftab"+(i===fF?" on":"");b.textContent=r.panel.name||"Film"+(i+1);b.addEventListener("click",()=>{fF=i;document.querySelectorAll("#fullTabs .ftab").forEach((t,j)=>t.classList.toggle("on",j===i));drawFull();});ft.appendChild(b);});
   setTimeout(()=>{fcv.width=fcv.offsetWidth;fcv.height=fcv.offsetHeight;fresetZoom();},60);
-  let fd2=null;
+  let fd2=null,fPinch=null;
   fcv.onmousedown=e=>{fd2={x:e.clientX,y:e.clientY};};
   fcv.onmousemove=e=>{if(!fd2)return;fX+=e.clientX-fd2.x;fY+=e.clientY-fd2.y;fd2={x:e.clientX,y:e.clientY};drawFull();};
   fcv.onmouseup=()=>fd2=null;
   fcv.onwheel=e=>{e.preventDefault();fS*=e.deltaY<0?1.1:.9;drawFull();};
+  // 터치 드래그 / 핀치줌 (passive:false 필요 → addEventListener)
+  if(!fcv._touchBound){
+    fcv._touchBound=true;
+    fcv.addEventListener("touchstart",e=>{if(e.touches.length===1){fd2={x:e.touches[0].clientX,y:e.touches[0].clientY};}else if(e.touches.length===2){fPinch=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);}},{passive:true});
+    fcv.addEventListener("touchmove",e=>{e.preventDefault();if(e.touches.length===1&&fd2){fX+=e.touches[0].clientX-fd2.x;fY+=e.touches[0].clientY-fd2.y;fd2={x:e.touches[0].clientX,y:e.touches[0].clientY};drawFull();}else if(e.touches.length===2&&fPinch){const d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);fS*=d/fPinch;fPinch=d;drawFull();}},{passive:false});
+    fcv.addEventListener("touchend",e=>{if(e.touches.length===0){fd2=null;fPinch=null;}},{passive:true});
+  }
 }
 function drawFull(){
   fctx.clearRect(0,0,fcv.width,fcv.height);fctx.fillStyle="#F1F3F5";fctx.fillRect(0,0,fcv.width,fcv.height);
