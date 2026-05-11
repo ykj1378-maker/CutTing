@@ -998,18 +998,13 @@ function validateSize(pi,ji){
     }
   }
 
-  // ── 3. 정상 — 수량으로 이동, 마지막 행이면 새 행 추가 ─────────────
+  // ── 3. 정상 — 마지막 행이면 새 행 추가, 수량으로 포커스 ─────────────
   const wasLast=ji===parts[pi].length-1;
   if(wasLast){
     chkAddPart(pi,ji);
-    setTimeout(()=>{
-      const t=document.getElementById(`ct_${pi}`);if(!t)return;
-      const r=t.querySelectorAll(".crow");
-      if(r[ji]){const inp=r[ji].querySelector('input[data-col="quantity"]');if(inp){inp.focus();inp.select();}}
-    },10);
-  } else {
-    moveFocusToQty(pi,ji);
   }
+  // 새 행 추가(addPart 50ms) 전에 수량으로 먼저 이동
+  setTimeout(()=>moveFocusToQty(pi,ji),10);
 }
 
 function moveFocusToQty(pi,ji){
@@ -1066,13 +1061,19 @@ function cutKey(e,pi,ji,col){
   }
   const isEnter=e.key==="Enter",isTab=e.key==="Tab"&&!e.shiftKey;
   if(!isEnter&&!isTab)return;
-  // Tab: 폭→수량 포커스 이동
-  if(isTab&&col==="width"){
+
+  // 폭 셀에서 Tab/Enter → validateSize 직접 호출 후 포커스 이동은 모달 확인 후 처리
+  if(col==="width"&&(isTab||isEnter)){
     e.preventDefault();
-    const inp=rows[ji].querySelector('input[data-col="quantity"]');
-    if(inp){inp.focus();inp.select();}
+    // DOM→parts 즉시 동기화
+    const wInp=rows[ji].querySelector('input[data-col="width"]');
+    const lInp=rows[ji].querySelector('input[data-col="length"]');
+    if(lInp){const v=lInp.value;parts[pi][ji].length=v===""?"":parseFloat(v)||"";}
+    if(wInp){const v=wInp.value;parts[pi][ji].width=v===""?"":parseFloat(v)||"";}
+    validateSize(pi,ji);
     return;
   }
+
   // Tab: 수량→다음 행 이름 (색상·삭제 셀 건너뜀)
   if(isTab&&col==="quantity"){
     e.preventDefault();
