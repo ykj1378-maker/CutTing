@@ -950,8 +950,8 @@ function appendCRow(pi,ji,tbl){
     if(_validating)return;
     parts[pi][ji].length=l.value===""?"":parseFloat(l.value)||"";
     parts[pi][ji].width=w.value===""?"":parseFloat(w.value)||"";
-    // 해당 Film 탭 즉시 전환 (폭 입력 완료 시)
-    if(pi>=0&&pi<panels.length&&parseFloat(parts[pi][ji].length)>0){
+    // 폭 입력 완료 시 해당 Film 탭 즉시 전환
+    if(parseFloat(parts[pi][ji].length)>0&&pi<panels.length&&pi!==curFilm){
       curFilm=pi; renderFTabs();
     }
     setTimeout(()=>validateSize(pi,ji),200);
@@ -1072,20 +1072,6 @@ function clearHint(pi,ji){setHint(pi,ji,"","");}
 /* ── validateSize ── */
 let _validating=false;
 
-// 치수 입력 초기화 헬퍼 (길이/폭 데이터+DOM 지우고 이름으로 포커스)
-function _clearLW(pi,ji){
-  parts[pi][ji].length=""; parts[pi][ji].width="";
-  const t=document.getElementById("ct_"+pi);if(!t)return;
-  const rows=Array.from(t.querySelectorAll(".crow"));
-  if(rows[ji]){
-    const lI=rows[ji].querySelector('input[data-col="length"]');
-    const wI=rows[ji].querySelector('input[data-col="width"]');
-    const nI=rows[ji].querySelector('input[data-col="name"]');
-    if(lI)lI.value=""; if(wI)wI.value=""; clearHint(pi,ji);
-    if(nI){nI.focus();nI.select();}
-  }
-}
-
 function validateSize(pi,ji){
   if(_validating)return;
   if(!parts[pi]||!parts[pi][ji])return;
@@ -1101,45 +1087,67 @@ function validateSize(pi,ji){
   const pl=parseFloat(panel.length), pw=parseFloat(panel.width);
   if(!pl||!pw){ clearHint(pi,ji); moveFocusToQty(pi,ji); return; }
 
-  // ── 1a. 원자재 전체보다 큰 경우 → 무조건 차단
+  // ── 1. 크기 초과 검사 ──────────────────────────────────────────
+  // 1a. 원자재 전체보다 큰 경우 → 무조건 차단
   if(Math.max(l,w)>Math.max(pl,pw) || Math.min(l,w)>Math.min(pl,pw)){
     setHint(pi,ji,"warn","⚠ 조각이 원자재(Film)보다 큽니다 — 치수를 다시 확인해주세요");
     _validating=true;
-    showSizeOverModal("조각이 원자재(Film)보다 큽니다!
-치수를 다시 확인해주세요.",()=>{
-      _clearLW(pi,ji); _validating=false; schedCalc();
+    showSizeOverModal("조각이 원자재(Film)보다 큽니다!\n치수를 다시 확인해주세요.",()=>{
+      parts[pi][ji].length=""; parts[pi][ji].width="";
+      const t=document.getElementById("ct_"+pi);
+      if(t){
+        const rows=Array.from(t.querySelectorAll(".crow"));
+        if(rows[ji]){
+          const lI=rows[ji].querySelector('input[data-col="length"]');
+          const wI=rows[ji].querySelector('input[data-col="width"]');
+          const nI=rows[ji].querySelector('input[data-col="name"]');
+          if(lI)lI.value=""; if(wI)wI.value=""; clearHint(pi,ji);
+          if(nI){nI.focus();nI.select();}
+        }
+      }
+      _validating=false; schedCalc();
     });
     return;
   }
 
-  // ── 1b. 잔여 여백보다 큰 경우 → 여백에 맞으면 허용, 아니면 차단 (모든 섹션 공통)
+  // 1b. 현재 잔여 여백보다 큰 경우 → 여백에 맞는 치수는 허용, 아니면 차단
   {
-    const without=(parts[pi]||[]).filter((_,k)=>{
-      if(k===ji)return false;
-      const p=parts[pi][k]; return parseFloat(p.length)>0&&parseFloat(p.width)>0;
+    // 이 조각(ji)을 제외한 나머지 조각들로 레이아웃 계산 → 잔여 공간 확인
+    const partsWithout=(parts[pi]||[]).filter((_,idx)=>{
+      if(idx===ji)return false;
+      const pt=parts[pi][idx];
+      return parseFloat(pt.length)>0&&parseFloat(pt.width)>0;
     });
-    const rwithout=bestFit({length:pl,width:pw,name:panels[pi].name},without,panels[pi].grain);
-    const canFit=rwithout.remaining.some(([,,aw,ah])=>(l<=aw&&w<=ah)||(w<=aw&&l<=ah));
+    const panelObj={length:pl,width:pw,name:panels[pi].name};
+    const rWithout=bestFit(panelObj,partsWithout,panels[pi].grain);
+    const canFit=rWithout.remaining.some(([,,aw,ah])=>(l<=aw&&w<=ah)||(w<=aw&&l<=ah));
     if(!canFit){
+      // 입력 가능한 최대 치수 안내
       let maxFit=null;
-      rwithout.remaining.forEach(([,,aw,ah])=>{
-        if(aw>1&&ah>1&&(!maxFit||aw*ah>maxFit.area)) maxFit={l:Math.floor(aw),w:Math.floor(ah),area:aw*ah};
-      });
-      const hint="⚠ 남은 여백에 배치 불가"+(maxFit?" (최대 "+maxFit.l+"×"+maxFit.w+"mm)":"");
-      const maxMsg=maxFit?"
-입력 가능한 최대 치수: "+maxFit.l+"×"+maxFit.w+" mm":"";
-      setHint(pi,ji,"warn",hint);
+      rWithout.remaining.forEach(([,,aw,ah])=>{if(aw>0&&ah>0&&(!maxFit||aw*ah>maxFit.area))maxFit={l:Math.floor(aw),w:Math.floor(ah),area:aw*ah};});
+      const maxMsg=maxFit?"\n입력 가능한 최대 치수: "+maxFit.l+"×"+maxFit.w+" mm":"";
+      setHint(pi,ji,"warn","⚠ 남은 여백에 배치할 수 없는 치수입니다");
       _validating=true;
-      showSizeOverModal("남은 원자재 여백에 배치할 수 없는 치수입니다!
-치수를 다시 확인해주세요."+maxMsg,()=>{
-        _clearLW(pi,ji); _validating=false; schedCalc();
+      showSizeOverModal("남은 원자재 여백에 배치할 수 없는 치수입니다!\n치수를 다시 확인해주세요."+maxMsg,()=>{
+        parts[pi][ji].length=""; parts[pi][ji].width="";
+        const t=document.getElementById("ct_"+pi);
+        if(t){
+          const rows=Array.from(t.querySelectorAll(".crow"));
+          if(rows[ji]){
+            const lI=rows[ji].querySelector('input[data-col="length"]');
+            const wI=rows[ji].querySelector('input[data-col="width"]');
+            const nI=rows[ji].querySelector('input[data-col="name"]');
+            if(lI)lI.value=""; if(wI)wI.value=""; clearHint(pi,ji);
+            if(nI){nI.focus();nI.select();}
+          }
+        }
+        _validating=false; schedCalc();
       });
       return;
     }
   }
-  // ── 2. 수량 초과 검사 — 즉시 계산 + 해당 Film 탭 자동 전환
+  // ── 2. 수량 초과 검사 — 즉시 계산
   clearTimeout(calcT);
-  if(pi>=0&&pi<panels.length) curFilm=pi; // 입력 중인 섹션 즉시 전환
   calcLayout();
 
   const res=results[pi];
@@ -1412,25 +1420,16 @@ function calcLayout(){
   }
 
   if(!_validating){
-    // 마지막으로 입력된 조각이 있는 Film으로 자동 전환
-    // (사용자가 입력 중인 섹션 = 가장 마지막 유효 parts를 가진 인덱스)
-    let activeFilm=-1;
-    for(let i=results.length-1;i>=0;i--){
-      if(results[i].placed.length>0||(parts[i]&&parts[i].some(p=>parseFloat(p.length)>0))){
-        activeFilm=i; break;
-      }
-    }
-    // 현재 포커스가 있는 섹션 우선 (입력 중인 조각 행의 pi)
+    // 현재 포커스가 있는 조각 섹션(pi)으로 자동 Film 탭 전환
     const focused=document.activeElement;
     if(focused){
-      const crow=focused.closest('.crow');
+      const crow=focused.closest(".crow");
       if(crow&&crow.dataset.pi!==undefined){
         const fpi=parseInt(crow.dataset.pi);
-        if(fpi>=0&&fpi<results.length)activeFilm=fpi;
+        if(fpi>=0&&fpi<results.length&&fpi!==curFilm){
+          curFilm=fpi;
+        }
       }
-    }
-    if(activeFilm>=0&&activeFilm!==curFilm){
-      curFilm=activeFilm;
     }
     renderFTabs();drawCV();updIB();
   }
@@ -1482,25 +1481,31 @@ function drawCV(){
   const ox=(cw-panel.length*scale)/2+cvX,oy=(ch-panel.width*scale)/2+cvY+15;
   ctx.fillStyle="#FFF";ctx.strokeStyle="#495057";ctx.lineWidth=1.5;
   ctx.fillRect(ox,oy,panel.length*scale,panel.width*scale);ctx.strokeRect(ox,oy,panel.length*scale,panel.width*scale);
-  // 패널 치수 (크게)
+  // ── 패널 치수 (크게) ──
   ctx.fillStyle="#495057";ctx.font="bold 13px 맑은 고딕";ctx.textAlign="center";
   ctx.fillText(fd(panel.length/1000)+"m",ox+panel.length*scale/2,oy-10);
-  ctx.save();ctx.translate(ox-18,oy+panel.width*scale/2);ctx.rotate(-Math.PI/2);ctx.textAlign="center";ctx.fillText(fd(panel.width/1000)+"m",0,0);ctx.restore();
-  // 잔여영역 + 치수
+  ctx.save();ctx.translate(ox-18,oy+panel.width*scale/2);ctx.rotate(-Math.PI/2);ctx.textAlign="center";
+  ctx.fillText(fd(panel.width/1000)+"m",0,0);ctx.restore();
+
+  // ── 잔여 영역 (빨간 점선 + 치수 표시) ── PC앱 draw_remaining_areas 동일
   ctx.strokeStyle="#E03131";ctx.lineWidth=1;ctx.setLineDash([4,2]);
   res.remaining.forEach(([ax,ay,aw,ah])=>{
     if(aw<2||ah<2)return;
     const rx=ox+ax*scale,ry=oy+ay*scale,rw=aw*scale,rh=ah*scale;
     ctx.strokeRect(rx,ry,rw,rh);
+    // 잔여 치수 텍스트 (PC앱 동일: 길이 상단, 폭 좌측)
     if(rw>35&&rh>22){
       const rfs=Math.max(8,Math.min(13,Math.floor(Math.min(rw/7,rh/3.5))));
       ctx.fillStyle="#E03131";ctx.font=rfs+"px 'Courier New'";
-      ctx.textAlign="center";ctx.fillText(Math.round(aw),rx+rw/2,ry+rfs+2);
-      ctx.textAlign="left";ctx.fillText(Math.round(ah),rx+3,ry+rh/2+rfs*.35);
+      ctx.textAlign="center";
+      ctx.fillText(Math.round(aw),rx+rw/2,ry+rfs+2);
+      ctx.textAlign="left";
+      ctx.fillText(Math.round(ah),rx+3,ry+rh/2+rfs*.35);
     }
   });
   ctx.setLineDash([]);
-  // 조각 (치수 크게, PC앱 동일)
+
+  // ── 조각 (PC앱 draw_placed_parts 동일: 이름 중앙, 길이 상단, 폭 좌측) ──
   res.placed.forEach(p=>{
     const x1=ox+p.x*scale,y1=oy+p.y*scale,bw=p.length*scale,bh=p.width*scale;
     ctx.fillStyle=p.color;ctx.strokeStyle="#444";ctx.lineWidth=.8;
@@ -1508,11 +1513,20 @@ function drawCV(){
     if(bw>22&&bh>15){
       const tc=cc(p.color);
       const fs=Math.max(7,Math.min(15,Math.floor(Math.min(bw/5,bh/2.5))));
-      const fsS=Math.max(6,fs-2);
+      const fsSmall=Math.max(6,fs-2);
+      // 이름 — 중앙
       ctx.fillStyle=tc;ctx.font="bold "+fs+"px 맑은 고딕";ctx.textAlign="center";
       if(p.name)ctx.fillText(p.name,x1+bw/2,y1+bh/2+fs*.35);
-      if(bh>28){ctx.font=fsS+"px 'Courier New'";ctx.textAlign="center";ctx.fillText(Math.round(p.length),x1+bw/2,y1+fsS+2);}
-      if(bw>45){ctx.font=fsS+"px 'Courier New'";ctx.textAlign="left";ctx.fillText(Math.round(p.width),x1+3,y1+bh/2+fsS*.35);}
+      // 길이 — 상단 중앙 (PC앱 동일)
+      if(bh>28){
+        ctx.font=fsSmall+"px 'Courier New'";ctx.textAlign="center";
+        ctx.fillText(Math.round(p.length),x1+bw/2,y1+fsSmall+2);
+      }
+      // 폭 — 좌측 중앙 (PC앱 동일)
+      if(bw>45){
+        ctx.font=fsSmall+"px 'Courier New'";ctx.textAlign="left";
+        ctx.fillText(Math.round(p.width),x1+3,y1+bh/2+fsSmall*.35);
+      }
     }
   });
   const usedLen=res.placed.length?Math.max(...res.placed.map(p=>p.x+p.length)):0,remLen=Math.max(0,panel.length-usedLen);
@@ -1610,11 +1624,10 @@ function drawFull(){
   // 패널 배경
   fctx.fillStyle=lineMode?"#FAFAFA":"#FFF";fctx.strokeStyle="#495057";fctx.lineWidth=1.5;
   fctx.fillRect(ox,oy,panel.length*scale,panel.width*scale);fctx.strokeRect(ox,oy,panel.length*scale,panel.width*scale);
-  // 패널 치수 (크게)
   fctx.fillStyle="#495057";fctx.font="bold 14px 맑은 고딕";fctx.textAlign="center";
   fctx.fillText(fd(panel.length/1000)+"m",ox+panel.length*scale/2,oy-12);
   fctx.save();fctx.translate(ox-20,oy+panel.width*scale/2);fctx.rotate(-Math.PI/2);fctx.textAlign="center";fctx.fillText(fd(panel.width/1000)+"m",0,0);fctx.restore();
-  // 잔여영역 + 치수 표시
+  // 잔여 영역 + 치수 표시 (PC앱 draw_remaining_areas 동일)
   if(!lineMode){
     fctx.strokeStyle="#E03131";fctx.lineWidth=1;fctx.setLineDash([4,2]);
     res.remaining.forEach(([ax,ay,aw,ah])=>{
@@ -1634,6 +1647,7 @@ function drawFull(){
   res.placed.forEach(p=>{
     const x1=ox+p.x*scale,y1=oy+p.y*scale,bw=p.length*scale,bh=p.width*scale;
     if(lineMode){
+      // Line Mode: 윤곽선만, 배경 흰색 반투명, 치수+이름 텍스트 강조
       fctx.fillStyle="rgba(255,255,255,0.6)";fctx.fillRect(x1,y1,bw,bh);
       fctx.strokeStyle=p.color;fctx.lineWidth=1.8;fctx.strokeRect(x1,y1,bw,bh);
       if(bw>20&&bh>14){
@@ -1643,17 +1657,17 @@ function drawFull(){
         if(bh>32){fctx.font=Math.max(6,fs-2)+"px 'Courier New'";fctx.fillText(Math.round(p.length)+"×"+Math.round(p.width),x1+bw/2,y1+bh/2-fs*.8);}
       }
     } else {
-      // Normal Mode: 치수 크게 (PC앱 동일)
+      // Normal Mode: 채우기 + 윤곽선 + 텍스트 (크게)
       fctx.fillStyle=p.color;fctx.strokeStyle="#444";fctx.lineWidth=.8;
       fctx.fillRect(x1,y1,bw,bh);fctx.strokeRect(x1,y1,bw,bh);
       if(bw>22&&bh>15){
         const tc=cc(p.color);
         const fs=Math.max(8,Math.min(16,Math.floor(Math.min(bw/5,bh/2.5))));
-        const fsS=Math.max(7,fs-2);
+        const fsSmall=Math.max(7,fs-2);
         fctx.fillStyle=tc;fctx.font="bold "+fs+"px 맑은 고딕";fctx.textAlign="center";
         if(p.name)fctx.fillText(p.name,x1+bw/2,y1+bh/2+fs*.35);
-        if(bh>30){fctx.font=fsS+"px 'Courier New'";fctx.textAlign="center";fctx.fillText(Math.round(p.length),x1+bw/2,y1+fsS+2);}
-        if(bw>50){fctx.font=fsS+"px 'Courier New'";fctx.textAlign="left";fctx.fillText(Math.round(p.width),x1+3,y1+bh/2+fsS*.35);}
+        if(bh>30){fctx.font=fsSmall+"px 'Courier New'";fctx.textAlign="center";fctx.fillText(Math.round(p.length),x1+bw/2,y1+fsSmall+2);}
+        if(bw>50){fctx.font=fsSmall+"px 'Courier New'";fctx.textAlign="left";fctx.fillText(Math.round(p.width),x1+3,y1+bh/2+fsSmall*.35);}
       }
     }
   });
