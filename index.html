@@ -1097,19 +1097,17 @@ function validateSize(pi,ji){
         parts[pi][ji].length=""; parts[pi][ji].width="";
         rebuildSec(pi);
         clearHint(pi,ji);
-        requestAnimationFrame(()=>{
-          setTimeout(()=>{
-            const t=document.getElementById(`ct_${pi}`);
-            if(!t){ _validating=false; schedCalc(); return; }
-            const r=t.querySelectorAll(".crow");
-            if(r[ji]){
-              const inp=r[ji].querySelector('input[data-col="name"]');
-              if(inp){ inp.focus(); inp.select(); }
-            }
-            _validating=false;
-            schedCalc();
-          },0);
-        });
+
+        const t=document.getElementById(`ct_${pi}`);
+        if(t){
+          const r=t.querySelectorAll(".crow");
+          if(r[ji]){
+            const inp=r[ji].querySelector('input[data-col="name"]');
+            if(inp){ inp.focus(); inp.select(); }
+          }
+        }
+        _validating=false;
+        schedCalc();
       }
     );
     return;
@@ -1152,25 +1150,23 @@ function validateSize(pi,ji){
       parts[pi][ji].quantity=adjustedQ;
       cvX=0; cvY=0; cvS=1;
 
-      // ② DOM 재생성 (schedCalc 는 포커스 이후에 호출)
+      // ② DOM 재생성 (동기 — 즉시 반영)
       rebuildSec(pi);
 
-      // ③ 레이아웃 반영 후 포커스 — rAF+setTimeout(0) 으로 DOM paint 완전 대기
-      requestAnimationFrame(()=>{
-        setTimeout(()=>{
-          const t=document.getElementById(`ct_${pi}`);
-          if(!t){ _validating=false; schedCalc(); return; }
-          const rows=t.querySelectorAll(".crow");
-          if(rows[ji]){
-            setHint(pi,ji,"info",`ℹ 수량이 ${adjustedQ}개로 자동 조정되었습니다`);
-            const inp=rows[ji].querySelector('input[data-col="quantity"]');
-            if(inp){ inp.focus(); inp.select(); }
-          }
-          // ④ 포커스 완전 확정 후 계산 및 _validating 해제
-          _validating=false;
-          schedCalc();
-        },0);
-      });
+      // ③ 포커스 — rebuildSec은 동기이므로 즉시 DOM에 존재
+      const t=document.getElementById(`ct_${pi}`);
+      if(t){
+        const rows=t.querySelectorAll(".crow");
+        if(rows[ji]){
+          setHint(pi,ji,"info",`ℹ 수량이 ${adjustedQ}개로 자동 조정되었습니다`);
+          const inp=rows[ji].querySelector('input[data-col="quantity"]');
+          if(inp){ inp.focus(); inp.select(); }
+        }
+      }
+
+      // ④ _validating 해제 → schedCalc (포커스 완전 확정 후)
+      _validating=false;
+      schedCalc();
     });
     return;
   }
@@ -1194,15 +1190,8 @@ function showSizeOverModal(msg,onOk){
   document.getElementById("soMsg").textContent=msg;
   const okBtn=document.getElementById("soOk");
   okBtn.onclick=()=>{
-    mo.classList.remove("on");
-    // 1) rAF: 모달 hide paint 완료
-    // 2) setTimeout(0): JS 이벤트 큐 flush — 남은 blur 이벤트 모두 소진
-    // 3) 그 다음 onOk 실행 → focus() 가 최후에 실행되므로 차단 없음
-    requestAnimationFrame(()=>{
-      setTimeout(()=>{
-        if(onOk) onOk();
-      },0);
-    });
+    mo.classList.remove("on");   // 모달 숨김 (동기)
+    if(onOk) onOk();             // 콜백 즉시 실행 — 사용자 클릭 컨텍스트 유지
   };
   mo.classList.add("on");
   okBtn.focus();
@@ -1386,9 +1375,7 @@ function calcLayout(){
     });
   }
 
-  // _validating 중(모달 후 포커스 확정 전)엔 탭·캔버스 갱신 skip — 포커스 탈취 방지
-  if(_validating){ return; }
-  renderFTabs();drawCV();updIB();
+  if(!_validating){ renderFTabs();drawCV();updIB(); }
 }
 function schedCalc(){clearTimeout(calcT);calcT=setTimeout(calcLayout,200);}
 
