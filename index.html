@@ -584,7 +584,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--tx);height:100vh;o
   <button id="adjDropPlus" style="color:#1971C2">＋ 증가</button>
   <button id="adjDropMinus" style="color:#C92A2A">－ 감소</button>
 </div>
-<div class="mo" id="soMo">
+<div class="mo" id="soMo" tabindex="-1">
 <div class="mc" style="max-width:320px">
   <div class="mct" style="color:#E03131">⚠️ Size Over</div>
   <p id="soMsg" style="white-space:pre-line;font-size:13px;line-height:1.6;color:var(--tx);padding:4px 0 12px"></p>
@@ -1094,16 +1094,21 @@ function validateSize(pi,ji){
     showSizeOverModal(
       "조각이 원자재(Film)보다 큽니다!\n치수를 다시 확인해주세요.",
       ()=>{
+        // 치수 데이터 초기화
         parts[pi][ji].length=""; parts[pi][ji].width="";
-        rebuildSec(pi);
-        clearHint(pi,ji);
 
+        // DOM 재생성 없이 길이/폭 input만 직접 초기화
         const t=document.getElementById(`ct_${pi}`);
         if(t){
-          const r=t.querySelectorAll(".crow");
-          if(r[ji]){
-            const inp=r[ji].querySelector('input[data-col="name"]');
-            if(inp){ inp.focus(); inp.select(); }
+          const rows=t.querySelectorAll(".crow");
+          if(rows[ji]){
+            const lInp=rows[ji].querySelector('input[data-col="length"]');
+            const wInp=rows[ji].querySelector('input[data-col="width"]');
+            const nInp=rows[ji].querySelector('input[data-col="name"]');
+            if(lInp) lInp.value="";
+            if(wInp) wInp.value="";
+            clearHint(pi,ji);
+            if(nInp){ nInp.focus(); nInp.select(); }
           }
         }
         _validating=false;
@@ -1146,25 +1151,24 @@ function validateSize(pi,ji){
 
     _validating=true;
     showSizeOverModal(msg,()=>{
-      // ① 수량 저장
+      // ① 데이터 저장
       parts[pi][ji].quantity=adjustedQ;
       cvX=0; cvY=0; cvS=1;
 
-      // ② DOM 재생성 (동기 — 즉시 반영)
-      rebuildSec(pi);
-
-      // ③ 포커스 — rebuildSec은 동기이므로 즉시 DOM에 존재
+      // ② DOM 재생성 없이 수량 input.value만 직접 갱신 → 포커스 유지 가능
       const t=document.getElementById(`ct_${pi}`);
       if(t){
         const rows=t.querySelectorAll(".crow");
         if(rows[ji]){
-          setHint(pi,ji,"info",`ℹ 수량이 ${adjustedQ}개로 자동 조정되었습니다`);
-          const inp=rows[ji].querySelector('input[data-col="quantity"]');
-          if(inp){ inp.focus(); inp.select(); }
+          const qInp=rows[ji].querySelector('input[data-col="quantity"]');
+          if(qInp){
+            qInp.value=adjustedQ;           // 값 직접 갱신
+            setHint(pi,ji,"info",`ℹ 수량이 ${adjustedQ}개로 자동 조정되었습니다`);
+            qInp.focus();                   // DOM 그대로이므로 포커스 즉시 작동
+            qInp.select();
+          }
         }
       }
-
-      // ④ _validating 해제 → schedCalc (포커스 완전 확정 후)
       _validating=false;
       schedCalc();
     });
@@ -1189,12 +1193,21 @@ function showSizeOverModal(msg,onOk){
   const mo=document.getElementById("soMo");
   document.getElementById("soMsg").textContent=msg;
   const okBtn=document.getElementById("soOk");
-  okBtn.onclick=()=>{
-    mo.classList.remove("on");   // 모달 숨김 (동기)
-    if(onOk) onOk();             // 콜백 즉시 실행 — 사용자 클릭 컨텍스트 유지
-  };
+
+  function doOk(){
+    mo.classList.remove("on");
+    mo.removeEventListener("keydown",onKey);
+    if(onOk) onOk();
+  }
+  function onKey(e){
+    if(e.key==="Enter"||e.key===" "){e.preventDefault();doOk();}
+  }
+
+  okBtn.onclick=doOk;
+  mo.addEventListener("keydown",onKey);
   mo.classList.add("on");
-  okBtn.focus();
+  // 애니메이션(0.2s) 완료 후 포커스 확정
+  setTimeout(()=>{ okBtn.focus(); },220);
 }
 // Enter/Tab/화살표 키: 같은 열의 다음 행으로 이동 (마지막 행이면 다음 열로)
 function cutKey(e,pi,ji,col){
