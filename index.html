@@ -953,6 +953,7 @@ function appendCRow(pi,ji,tbl){
     const vl=l.value,vw=w.value;
     parts[pi][ji].length=vl===""?"":parseFloat(vl)||"";
     parts[pi][ji].width=vw===""?"":parseFloat(vw)||"";
+    // 폭 blur 시 자동행 추가 조건 갖춰지면 먼저 체크, 그 후 validateSize
     validateSize(pi,ji);
   });
 
@@ -964,7 +965,9 @@ function appendCRow(pi,ji,tbl){
   // 수량 blur → Python: quantity FocusOut도 validate_size 호출
   q.addEventListener("blur",()=>{
     if(_validating)return;
-    parts[pi][ji].quantity=Math.max(1,parseInt(q.value)||1);
+    const newQ=Math.max(1,parseInt(q.value)||1);
+    parts[pi][ji].quantity=newQ;
+    q.value=newQ; // 값 정규화
     validateSize(pi,ji);
   });
 
@@ -1151,26 +1154,32 @@ function validateSize(pi,ji){
 
     _validating=true;
     showSizeOverModal(msg,()=>{
-      // ① 데이터 저장
+      // ① 데이터 저장 (chkAddPart/schedCalc 연쇄 막으려고 _validating 유지)
       parts[pi][ji].quantity=adjustedQ;
       cvX=0; cvY=0; cvS=1;
 
-      // ② DOM 재생성 없이 수량 input.value만 직접 갱신 → 포커스 유지 가능
+      // ② DOM 재생성 없이 수량 input.value만 직접 갱신
       const t=document.getElementById(`ct_${pi}`);
+      let qInp=null;
       if(t){
         const rows=t.querySelectorAll(".crow");
         if(rows[ji]){
-          const qInp=rows[ji].querySelector('input[data-col="quantity"]');
-          if(qInp){
-            qInp.value=adjustedQ;           // 값 직접 갱신
-            setHint(pi,ji,"info",`ℹ 수량이 ${adjustedQ}개로 자동 조정되었습니다`);
-            qInp.focus();                   // DOM 그대로이므로 포커스 즉시 작동
-            qInp.select();
-          }
+          qInp=rows[ji].querySelector('input[data-col="quantity"]');
+          if(qInp) qInp.value=adjustedQ;
         }
       }
-      _validating=false;
-      schedCalc();
+      setHint(pi,ji,"info",`ℹ 수량이 ${adjustedQ}개로 자동 조정되었습니다`);
+
+      // ③ _validating 해제 후 포커스 이동 — blur 이벤트 재진입 완전 차단
+      setTimeout(()=>{
+        _validating=false;
+        schedCalc();
+        // 수량 입력란으로 포커스 이동
+        if(qInp){
+          qInp.focus();
+          qInp.select();
+        }
+      },50);
     });
     return;
   }
@@ -1183,9 +1192,13 @@ function validateSize(pi,ji){
 }
 
 function moveFocusToQty(pi,ji){
+  if(_validating)return;
   const t=document.getElementById(`ct_${pi}`);if(!t)return;
   const rows=t.querySelectorAll(".crow");
-  if(rows[ji]){const qq=rows[ji].querySelector('input[data-col="quantity"]');if(qq&&document.activeElement!==qq){qq.focus();qq.select();}}
+  if(rows[ji]){
+    const qq=rows[ji].querySelector('input[data-col="quantity"]');
+    if(qq&&document.activeElement!==qq){qq.focus();qq.select();}
+  }
 }
 
 // Size Over 모달
@@ -1197,6 +1210,7 @@ function showSizeOverModal(msg,onOk){
   function doOk(){
     mo.classList.remove("on");
     mo.removeEventListener("keydown",onKey);
+    okBtn.onclick=null; // 중복 호출 방지
     if(onOk) onOk();
   }
   function onKey(e){
