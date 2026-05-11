@@ -178,9 +178,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--tx);height:100vh;o
 .crow-hint.warn{display:flex;background:#FFF5F5;color:#C92A2A}
 .crow-hint.info{display:flex;background:#E7F5FF;color:#1864AB}
 .crow-hint.ok{display:flex;background:#F0FFF4;color:#2B8A3E}
-/* 힌트 깜빡임 */
-@keyframes hint-blink{0%,100%{background:#FFF5F5;color:#C92A2A}50%{background:#FFCCCC;color:#8B0000}}
-.crow-hint.warn.blink{animation:hint-blink 500ms step-end infinite}
+/* 힌트 깜빡임 제거 — warn은 정적 표시 */
 /* adj 조정 UI */
 .adj-cell{display:inline-flex;align-items:center;background:#F1F3F5;border:1px solid #CED4DA;border-radius:4px;overflow:hidden;height:22px;margin-left:8px}
 .adj-sign{background:none;border:none;border-right:1px solid #CED4DA;font-size:11px;font-weight:700;padding:0 6px;cursor:pointer;height:100%;color:#1971C2;font-family:var(--font)}
@@ -949,15 +947,13 @@ function appendCRow(pi,ji,tbl){
   w.style.width="100px";
   w.addEventListener("keydown",e=>cutKey(e,pi,ji,"width"));
   w._keyExit=false;
-  w.addEventListener("keydown",e=>{
-    if(e.key==="Tab"||e.key==="Enter") w._keyExit=true;
-  });
+  w.addEventListener("keydown",e=>{if(e.key==="Tab"||e.key==="Enter")w._keyExit=true;});
   w.addEventListener("blur",()=>{
     if(_validating)return;
     const vl=l.value,vw=w.value;
     parts[pi][ji].length=vl===""?"":parseFloat(vl)||"";
     parts[pi][ji].width=vw===""?"":parseFloat(vw)||"";
-    if(w._keyExit){w._keyExit=false;return;}
+    if(w._keyExit){w._keyExit=false;return;} // cutKey에서 이미 처리
     validateSize(pi,ji);
   });
 
@@ -1068,7 +1064,7 @@ function _adjRefreshLabel(pi,ji,st){
 function setHint(pi,ji,type,msg){
   const h=document.getElementById(`hint_${pi}_${ji}`);
   if(!h)return;
-  h.className="crow-hint"+(type?" "+type:"")+(type==="warn"?" blink":"");
+  h.className="crow-hint"+(type?" "+type:""); // blink 제거
   h.textContent=msg||"";
 }
 function clearHint(pi,ji){setHint(pi,ji,"","");}
@@ -1141,29 +1137,36 @@ function validateSize(pi,ji){
     const remaining=res.panel.length-usedLen;
     const curQ=parseInt(parts[pi][ji].quantity)||1;
     const diff=totalInputQ-placedCount;
-    const adjustedQ=Math.max(1,curQ-diff);
+
+    // ── Python: adjustable_q = max(1, curQ - diff) ──
+    // max(1, ...) 보정으로 항상 1 이상, 치수는 절대 건드리지 않음
+    const adjustedQ=Math.max(1, curQ-diff);
+
+    let msg=`원자재의 용량이 부족하여 입력하신 조각 ${totalInputQ}개 중 ${placedCount}개만 배치되었습니다.\n치수나 수량을 다시 확인해주세요.`;
+    if(remaining<=0.1) msg="원자재의 잔여 길이가 0m입니다!\n더 이상 조각을 배치할 수 없습니다.";
+
+    // 인라인 힌트 — Python: f"⚠ Warning  {l}×{w}  수량 {diff}개"
     const ptL=parseFloat(parts[pi][ji].length)||0;
     const ptW=parseFloat(parts[pi][ji].width)||0;
-
-    setHint(pi,ji,"warn","⚠ Warning  "+Math.round(ptL)+"×"+Math.round(ptW)+"  수량 "+diff+"개");
-
-    let msg="원자재의 용량이 부족하여 입력하신 조각 "+totalInputQ+"개 중 "+placedCount+"개만 배치되었습니다.\n치수나 수량을 다시 확인해주세요.";
-    if(remaining<=0.1) msg="원자재의 잔여 길이가 0m입니다!\n더 이상 조각을 배치할 수 없습니다.";
+    setHint(pi,ji,"warn","⚠ Warning  "+Math.round(ptL)+"×"+Math.round(ptW)+"  수량 "+diff+"개  부족");
 
     _validating=true;
     showSizeOverModal(msg,()=>{
+      // 수량 데이터 조정
       parts[pi][ji].quantity=adjustedQ;
-      const t2=document.getElementById("ct_"+pi);
-      if(t2){
-        const r2=Array.from(t2.querySelectorAll(".crow"));
-        if(r2[ji]){
-          const qInp=r2[ji].querySelector('input[data-col="quantity"]');
+      // DOM 직접 갱신 (rebuildSec 없음)
+      const t=document.getElementById("ct_"+pi);
+      if(t){
+        const rows=Array.from(t.querySelectorAll(".crow"));
+        if(rows[ji]){
+          const qInp=rows[ji].querySelector('input[data-col="quantity"]');
           if(qInp) qInp.value=adjustedQ;
         }
       }
-      setHint(pi,ji,"info","ℹ 수량이 "+adjustedQ+"개로 자동 조정되었습니다");
+      // 힌트: warn 유지 (자동조정 후에도 부족 표시 유지)
       schedCalc();
       _validating=false;
+      // _validating=false 후 다음 tick에서 포커스 (blur 재진입 차단)
       setTimeout(()=>moveFocusToQty(pi,ji),0);
     });
     return;
@@ -1171,10 +1174,11 @@ function validateSize(pi,ji){
 
   // ── 3. 정상 — 마지막 행이면 새 행 추가, 수량으로 포커스
   clearHint(pi,ji);
-  const wasLast=(ji===parts[pi].length-1);
+  const wasLast=ji===parts[pi].length-1;
   if(wasLast) chkAddPart(pi,ji);
   setTimeout(()=>moveFocusToQty(pi,ji),60);
 }
+
 function moveFocusToQty(pi,ji){
   if(_validating)return;
   const t=document.getElementById("ct_"+pi);if(!t)return;
@@ -1373,7 +1377,7 @@ function calcLayout(){
         }
         if(missingJi>=0){
           // Python: f"⚠ Warning  {l}×{w}  수량 {diff}개"
-          setHint(i,missingJi,"warn",`⚠ Warning  ${Math.round(missingL)}×${Math.round(missingW)}  수량 ${missingDiff}개`);
+          setHint(i,missingJi,"warn","⚠ Warning  "+Math.round(missingL)+"×"+Math.round(missingW)+"  수량 "+missingDiff+"개  부족");
         }
       } else {
         // 모두 배치됨 → 힌트 제거 (단, info 힌트는 유지)
