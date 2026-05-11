@@ -1080,14 +1080,14 @@ function validateSize(pi,ji){
   const pl=parseFloat(panel.length), pw=parseFloat(panel.width);
   if(!pl||!pw){ clearHint(pi,ji); moveFocusToQty(pi,ji); return; }
 
-  // ── 1. 크기 초과 검사 (회전 고려)
+  // ── 1. 크기 초과 검사 (회전 고려) — Python: max(l,w)>max(p_l,p_w) or min(l,w)>min(p_l,p_w)
   if(Math.max(l,w)>Math.max(pl,pw) || Math.min(l,w)>Math.min(pl,pw)){
-    setHint(pi,ji,"warn","⚠ 조각이 원자재보다 큽니다 — 치수 초기화됨");
-    _validating=true; // 모달 표시 전 즉시 설정 — blur 재진입 차단
+    // Python: setHint 없이 바로 messagebox.showerror → 치수 초기화 → name 포커스
+    setHint(pi,ji,"warn","⚠ 조각이 원자재(Film)보다 큽니다 — 치수를 다시 확인해주세요");
+    _validating=true;
     showSizeOverModal(
       "조각이 원자재(Film)보다 큽니다!\n치수를 다시 확인해주세요.",
       ()=>{
-        // _validating은 여기서도 true 유지 — rebuildSec 중 blur 재진입 방지
         parts[pi][ji].length=""; parts[pi][ji].width="";
         rebuildSec(pi); schedCalc();
         clearHint(pi,ji);
@@ -1096,7 +1096,6 @@ function validateSize(pi,ji){
           const r=t.querySelectorAll(".crow");
           if(r[ji]){const inp=r[ji].querySelector('input[data-col="name"]');if(inp){inp.focus();inp.select();}}
         }
-        // rebuildSec·포커스 완전 정착 후 해제
         setTimeout(()=>{ _validating=false; },120);
       }
     );
@@ -1121,43 +1120,38 @@ function validateSize(pi,ji){
     const remaining=res.panel.length-usedLen;
     const curQ=parseInt(parts[pi][ji].quantity)||1;
     const diff=totalInputQ-placedCount;
-    const adjustedQ=curQ-diff;
+
+    // ── Python: adjustable_q = max(1, curQ - diff) ──
+    // max(1, ...) 보정으로 항상 1 이상, 치수는 절대 건드리지 않음
+    const adjustedQ=Math.max(1, curQ-diff);
 
     let msg=`원자재의 용량이 부족하여 입력하신 조각 ${totalInputQ}개 중 ${placedCount}개만 배치되었습니다.\n치수나 수량을 다시 확인해주세요.`;
     if(remaining<=0.1) msg="원자재의 잔여 길이가 0m입니다!\n더 이상 조각을 배치할 수 없습니다.";
 
-    // 인라인 힌트: 자동 수량 조정 예고
-    if(adjustedQ>=1){
-      setHint(pi,ji,"warn",`⚠ 배치 불가 ${diff}개 초과 — 수량 자동조정: ${curQ} → ${adjustedQ}`);
-    } else {
-      setHint(pi,ji,"warn","⚠ 원자재 용량 초과 — 치수 초기화됨");
-    }
+    // 인라인 힌트 — Python: f"⚠ Warning  {l}×{w}  수량 {diff}개"
+    const ptL=parseFloat(parts[pi][ji].length)||0;
+    const ptW=parseFloat(parts[pi][ji].width)||0;
+    setHint(pi,ji,"warn",`⚠ Warning  ${Math.round(ptL)}×${Math.round(ptW)}  수량 ${diff}개`);
 
-    _validating=true; // 모달 표시 전 즉시 설정 — blur 재진입 차단
+    _validating=true;
     showSizeOverModal(msg,()=>{
-      // _validating은 여기서도 true 유지 — rebuildSec 중 blur 재진입 방지
-      if(adjustedQ>=1){
-        parts[pi][ji].quantity=adjustedQ;
-      } else {
-        parts[pi][ji].length=""; parts[pi][ji].width=""; parts[pi][ji].quantity=1;
-      }
-      // 뷰 리셋 — Python의 panel_states ox/oy=0, auto_center=True 대응
+      // Python: adjustable_q > 0 → 수량만 조정, 치수는 건드리지 않음
+      // max(1,...) 보정으로 adjustedQ는 항상 1 이상이므로 else 분기 없음
+      parts[pi][ji].quantity=adjustedQ;
+
+      // 뷰 리셋 — Python: panel_states ox/oy=0, auto_center=True 대응
       cvX=0; cvY=0; cvS=1;
       rebuildSec(pi); schedCalc();
       const t=document.getElementById(`ct_${pi}`);
       if(t){
         const r=t.querySelectorAll(".crow");
         if(r[ji]){
-          if(adjustedQ>=1){
-            setHint(pi,ji,"info",`ℹ 수량이 ${adjustedQ}개로 자동 조정되었습니다`);
-            const inp=r[ji].querySelector('input[data-col="quantity"]');if(inp){inp.focus();inp.select();}
-          } else {
-            clearHint(pi,ji);
-            const inp=r[ji].querySelector('input[data-col="name"]');if(inp){inp.focus();inp.select();}
-          }
+          // Python: adjustable_q > 0 → 수량 셀로 포커스 이동
+          setHint(pi,ji,"info",`ℹ 수량이 ${adjustedQ}개로 자동 조정되었습니다`);
+          const inp=r[ji].querySelector('input[data-col="quantity"]');
+          if(inp){inp.focus();inp.select();}
         }
       }
-      // rebuildSec·포커스 완전 정착 후 해제
       setTimeout(()=>{ _validating=false; },120);
     });
     return;
@@ -1327,6 +1321,48 @@ function calcLayout(){
     results.push({panel:{...p,length:parseFloat(p.length),width:parseFloat(p.width)},placed:r.placed,remaining:r.remaining});
   });
   if(curFilm>=results.length)curFilm=Math.max(0,results.length-1);
+
+  // ── Python _generate_layout_actual 루프 대응:
+  // 배치 결과 후 누락 조각 힌트를 패널별로 자동 갱신 (_validating 중에는 skip)
+  if(!_validating){
+    results.forEach((res,i)=>{
+      if(!parts[i])return;
+      // 입력 수량 합계
+      let totalInputQ=0;
+      parts[i].forEach(pt=>{
+        if(parseFloat(pt.length)>0&&parseFloat(pt.width)>0)
+          totalInputQ+=parseInt(pt.quantity)||1;
+      });
+      const placedQ=res.placed.length;
+
+      if(totalInputQ>placedQ){
+        // Python: 누락 조각 식별 — 배치되지 못한 첫 번째 조각 찾기
+        const allP=[];
+        parts[i].forEach((pt,ji)=>{
+          const pl=parseFloat(pt.length),pw=parseFloat(pt.width),pq=parseInt(pt.quantity)||1;
+          if(pl>0&&pw>0){for(let k=0;k<pq;k++)allP.push({l:pl,w:pw,ji});}
+        });
+        const tempPlaced=res.placed.map(p=>({l:p.length,w:p.width}));
+        let missingJi=-1,missingL=0,missingW=0,missingDiff=totalInputQ-placedQ;
+        for(const p of allP){
+          const idx=tempPlaced.findIndex(tp=>(tp.l===p.l&&tp.w===p.w)||(tp.l===p.w&&tp.w===p.l));
+          if(idx!==-1)tempPlaced.splice(idx,1);
+          else{missingJi=p.ji;missingL=p.l;missingW=p.w;break;}
+        }
+        if(missingJi>=0){
+          // Python: f"⚠ Warning  {l}×{w}  수량 {diff}개"
+          setHint(i,missingJi,"warn",`⚠ Warning  ${Math.round(missingL)}×${Math.round(missingW)}  수량 ${missingDiff}개`);
+        }
+      } else {
+        // 모두 배치됨 → 힌트 제거 (단, info 힌트는 유지)
+        parts[i].forEach((_,ji)=>{
+          const h=document.getElementById(`hint_${i}_${ji}`);
+          if(h&&h.classList.contains("warn"))clearHint(i,ji);
+        });
+      }
+    });
+  }
+
   renderFTabs();drawCV();updIB();
 }
 function schedCalc(){clearTimeout(calcT);calcT=setTimeout(calcLayout,200);}
