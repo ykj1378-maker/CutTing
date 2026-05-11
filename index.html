@@ -1481,11 +1481,15 @@ function drawCV(){
   const ox=(cw-panel.length*scale)/2+cvX,oy=(ch-panel.width*scale)/2+cvY+15;
   ctx.fillStyle="#FFF";ctx.strokeStyle="#495057";ctx.lineWidth=1.5;
   ctx.fillRect(ox,oy,panel.length*scale,panel.width*scale);ctx.strokeRect(ox,oy,panel.length*scale,panel.width*scale);
-  // ── 패널 치수 (크게) ──
-  ctx.fillStyle="#495057";ctx.font="bold 13px 맑은 고딕";ctx.textAlign="center";
-  ctx.fillText(fd(panel.length/1000)+"m",ox+panel.length*scale/2,oy-10);
-  ctx.save();ctx.translate(ox-18,oy+panel.width*scale/2);ctx.rotate(-Math.PI/2);ctx.textAlign="center";
-  ctx.fillText(fd(panel.width/1000)+"m",0,0);ctx.restore();
+  // ── 패널 치수 — PC앱 draw_panel_dimensions 동일 ──
+  // 길이: 패널 상단 중앙, anchor="s" (패널 위 12px)
+  // 폭:   패널 좌측 중앙, anchor="e" (패널 왼쪽 12px), 회전 없음
+  ctx.fillStyle="#495057";ctx.font="bold 13px 맑은 고딕";
+  ctx.textAlign="center";ctx.textBaseline="bottom";
+  ctx.fillText(fd(panel.length/1000)+"(m)",ox+panel.length*scale/2,oy-4);
+  ctx.textAlign="right";ctx.textBaseline="middle";
+  ctx.fillText(fd(panel.width/1000)+"(m)",ox-6,oy+panel.width*scale/2);
+  ctx.textBaseline="alphabetic";
 
   // ── 잔여 영역 (빨간 점선 + 치수 표시) ── PC앱 draw_remaining_areas 동일
   ctx.strokeStyle="#E03131";ctx.lineWidth=1;ctx.setLineDash([4,2]);
@@ -1624,9 +1628,12 @@ function drawFull(){
   // 패널 배경
   fctx.fillStyle=lineMode?"#FAFAFA":"#FFF";fctx.strokeStyle="#495057";fctx.lineWidth=1.5;
   fctx.fillRect(ox,oy,panel.length*scale,panel.width*scale);fctx.strokeRect(ox,oy,panel.length*scale,panel.width*scale);
-  fctx.fillStyle="#495057";fctx.font="bold 14px 맑은 고딕";fctx.textAlign="center";
-  fctx.fillText(fd(panel.length/1000)+"m",ox+panel.length*scale/2,oy-12);
-  fctx.save();fctx.translate(ox-20,oy+panel.width*scale/2);fctx.rotate(-Math.PI/2);fctx.textAlign="center";fctx.fillText(fd(panel.width/1000)+"m",0,0);fctx.restore();
+  fctx.fillStyle="#495057";fctx.font="bold 14px 맑은 고딕";
+  fctx.textAlign="center";fctx.textBaseline="bottom";
+  fctx.fillText(fd(panel.length/1000)+"(m)",ox+panel.length*scale/2,oy-4);
+  fctx.textAlign="right";fctx.textBaseline="middle";
+  fctx.fillText(fd(panel.width/1000)+"(m)",ox-8,oy+panel.width*scale/2);
+  fctx.textBaseline="alphabetic";
   // 잔여 영역 + 치수 표시 (PC앱 draw_remaining_areas 동일)
   if(!lineMode){
     fctx.strokeStyle="#E03131";fctx.lineWidth=1;fctx.setLineDash([4,2]);
