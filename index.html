@@ -938,7 +938,7 @@ function appendCRow(pi,ji,tbl){
   l.addEventListener("blur",()=>{
     const v=l.value;
     parts[pi][ji].length=v===""?"":parseFloat(v)||"";
-    if(!_validating) validateSize(pi,ji);
+    // 길이 blur 시엔 데이터 저장만 — validateSize는 폭 입력 완료 후 호출
   });
 
   // 폭 — blur 에서 validateSize 호출
@@ -1231,6 +1231,14 @@ function cutKey(e,pi,ji,col){
   }
   const isEnter=e.key==="Enter",isTab=e.key==="Tab"&&!e.shiftKey;
   if(!isEnter&&!isTab)return;
+
+  // 길이 셀 Tab/Enter → 폭으로만 이동 (validateSize 호출 안 함)
+  if(col==="length"&&(isTab||isEnter)){
+    e.preventDefault();
+    const wInp=rows[ji].querySelector('input[data-col="width"]');
+    if(wInp){wInp.focus();wInp.select();}
+    return;
+  }
 
   // 폭 셀에서 Tab/Enter → validateSize 직접 호출 후 포커스 이동은 모달 확인 후 처리
   if(col==="width"&&(isTab||isEnter)){
