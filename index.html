@@ -557,12 +557,17 @@ body{font-family:var(--font);background:var(--bg);color:var(--tx);height:100vh;o
 
 <input type="file" id="fileInp" accept=".json" style="display:none" onchange="onFileLoad(event)">
 
-<!-- Size Over 모달 -->
+<!-- Size Over 모달 (Python messagebox.showerror 동일) -->
 <div class="mo" id="soMo">
-<div class="mc" style="max-width:320px">
-  <div class="mct" style="color:#E03131">⚠️ Size Over</div>
-  <p id="soMsg" style="white-space:pre-line;font-size:13px;line-height:1.6;color:var(--tx);padding:4px 0 12px"></p>
-  <div class="mbs"><button class="mb_" id="soOk">확인</button></div>
+<div class="mc" style="max-width:340px;padding:24px 24px 20px">
+  <div style="display:flex;flex-direction:column;align-items:center;text-align:center;gap:10px">
+    <div style="font-size:36px;line-height:1">⚠️</div>
+    <div style="font-size:14px;font-weight:700;color:#E03131;letter-spacing:.3px">Size Over</div>
+    <p id="soMsg" style="white-space:pre-line;font-size:13px;line-height:1.7;color:var(--tx);margin:0;padding:0"></p>
+  </div>
+  <div class="mbs" style="justify-content:center;margin-top:18px">
+    <button class="mb_ p" id="soOk" style="padding:8px 36px;font-size:13px">확인</button>
+  </div>
 </div></div>
 
 <!-- 요약 팝업 모달 -->
@@ -850,26 +855,31 @@ function appendCRow(pi,ji,tbl){
   const pt=parts[pi][ji];
   const row=document.createElement("div");row.className="crow";
 
-  // 이름
+  // 이름 — placeholder: "조각명"
   const n=mkInp("ci","text",pt.name||"","조각명",v=>{parts[pi][ji].name=v;schedCalc();},"name");
   n.style.flex="1.8";n.style.minWidth="0";
   n.addEventListener("keydown",e=>cutKey(e,pi,ji,"name"));
 
-  // 길이 — 빈 값은 "" 로 저장 (0 아닌 빈값 보존)
-  const l=mkInp("ci","number",pt.length||"","mm",v=>{
+  // 길이 — placeholder: "길이(mm)" / blur 시 DOM→parts 동기화 + validateSize 호출
+  const l=mkInp("ci","number",pt.length||"","길이(mm)",v=>{
     parts[pi][ji].length=v===""?"":parseFloat(v)||"";
     schedCalc();
   },"length");
   l.style.width="100px";
   l.addEventListener("keydown",e=>cutKey(e,pi,ji,"length"));
   l.addEventListener("blur",()=>{
-    // 길이 blur 시에도 DOM→parts 즉시 동기화
-    const v=l.value;
-    parts[pi][ji].length=v===""?"":parseFloat(v)||"";
+    // DOM→parts 즉시 동기화
+    const vl=l.value,vw=w.value;
+    parts[pi][ji].length=vl===""?"":parseFloat(vl)||"";
+    parts[pi][ji].width=vw===""?"":parseFloat(vw)||"";
+    // 길이 입력 후 폭도 입력된 상태면 검증 실행 (Python FocusOut 동일)
+    if(parts[pi][ji].length!==""&&parts[pi][ji].width!==""){
+      validateSize(pi,ji);
+    }
   });
 
-  // 폭 — blur 에서 validateSize 호출
-  const w=mkInp("ci","number",pt.width||"","mm",v=>{
+  // 폭 — placeholder: "폭(mm)" / blur 시 DOM→parts 동기화 + validateSize 호출
+  const w=mkInp("ci","number",pt.width||"","폭(mm)",v=>{
     parts[pi][ji].width=v===""?"":parseFloat(v)||"";
     schedCalc();
   },"width");
@@ -883,11 +893,18 @@ function appendCRow(pi,ji,tbl){
     validateSize(pi,ji);
   });
 
-  // 수량
+  // 수량 — placeholder: "수량" / blur 시도 validateSize 호출 (Python FocusOut 동일)
   const q=mkInp("ci","number",pt.quantity||1,"수량",null,"quantity");
   q.min="1";q.style.width="50px";
   q.addEventListener("input",()=>{parts[pi][ji].quantity=Math.max(1,parseInt(q.value)||1);schedCalc();});
   q.addEventListener("keydown",e=>cutKey(e,pi,ji,"quantity"));
+  q.addEventListener("blur",()=>{
+    // 수량 변경 후 blur 시 용량 초과 재검증 (Python FocusOut 동일)
+    parts[pi][ji].quantity=Math.max(1,parseInt(q.value)||1);
+    if(parts[pi][ji].length!==""&&parts[pi][ji].width!==""){
+      validateSize(pi,ji);
+    }
+  });
 
   // 색상 — Tab 제외
   const cb=document.createElement("div");cb.className="cbtn";cb.tabIndex=-1;
@@ -918,27 +935,34 @@ function removePart(pi,ji){
   parts[pi].splice(ji,1);rebuildSec(pi);schedCalc();
 }
 // 마지막 행 길이+폭 모두 입력(blur) 완료 시에만 새 행 자동 추가
+// 반환값: true = 새 행 추가됨
 function chkAddPart(pi,ji){
-  if(ji!==parts[pi].length-1)return;
+  if(ji!==parts[pi].length-1)return false;
   const pt=parts[pi][ji];
-  if(parseFloat(pt.length)>0&&parseFloat(pt.width)>0)addPart(pi);
+  if(parseFloat(pt.length)>0&&parseFloat(pt.width)>0){addPart(pi);return true;}
+  return false;
 }
 
-/* ── validateSize ── */
+/* ── validateSize ── Python 원본(cutting_app.py) 로직과 동일 ── */
 let _validating=false; // 재진입 방지 플래그
 
 function validateSize(pi,ji){
   if(_validating)return; // 모달 확인 후 rebuildSec 중 blur 재진입 차단
 
-  const l=parseFloat(parts[pi][ji].length);
-  const w=parseFloat(parts[pi][ji].width);
+  const l=parseFloat(parts[pi]?.[ji]?.length);
+  const w=parseFloat(parts[pi]?.[ji]?.width);
+
+  // 길이·폭 미입력 시: 수량 포커스로만 이동 (검증 없음)
   if(!l||!w){ moveFocusToQty(pi,ji); return; }
 
   const panel=panels[pi];
+  if(!panel){ moveFocusToQty(pi,ji); return; }
   const pl=parseFloat(panel.length),pw=parseFloat(panel.width);
+
+  // 원자재 치수 미입력 시: 포커스만 이동
   if(!pl||!pw){ moveFocusToQty(pi,ji); return; }
 
-  // ── 1. 크기 초과 검사 (회전 고려)
+  // ── 1. 크기 초과 검사 (회전 고려) — Python: max(l,w)>max(pl,pw) or min(l,w)>min(pl,pw)
   if(Math.max(l,w)>Math.max(pl,pw)||Math.min(l,w)>Math.min(pl,pw)){
     showSizeOverModal(
       "조각이 원자재(Film)보다 큽니다!\n치수를 다시 확인해주세요.",
@@ -957,60 +981,72 @@ function validateSize(pi,ji){
     return;
   }
 
-  // ── 2. 수량 초과 검사 — 즉시 계산
+  // ── 2. 수량 초과 검사 — 즉시 계산 (Python: self._generate_layout_actual())
   clearTimeout(calcT);
   calcLayout();
 
   const res=results[pi];
-  if(res){
-    const totalInputQ=parts[pi].reduce((s,p)=>{
-      const pl2=parseFloat(p.length),pw2=parseFloat(p.width),pq=parseInt(p.quantity)||1;
-      return (pl2>0&&pw2>0)?s+pq:s;
-    },0);
-    const placedCount=res.placed.length;
+  if(!res){ moveFocusToQty(pi,ji); return; }
 
-    if(totalInputQ>placedCount){
-      const usedLen=res.placed.length?Math.max(...res.placed.map(p=>p.x+p.length)):0;
-      const remaining=res.panel.length-usedLen;
+  // 전체 입력된 유효 조각 수량 합계 (Python: total_input_q)
+  const totalInputQ=parts[pi].reduce((s,p)=>{
+    const pl2=parseFloat(p.length),pw2=parseFloat(p.width),pq=parseInt(p.quantity)||1;
+    return (pl2>0&&pw2>0)?s+pq:s;
+  },0);
+  const placedCount=res.placed.length;
 
-      let msg=`원자재의 용량이 부족하여 입력하신 조각 ${totalInputQ}개 중 ${placedCount}개만 배치되었습니다.\n치수나 수량을 다시 확인해주세요.`;
-      if(remaining<=0.1) msg="원자재의 잔여 길이가 0m입니다!\n더 이상 조각을 배치할 수 없습니다.";
+  // 오류 조건: 입력된 총 수량 > 배치된 수량 (Python: total_input_q > placed_count)
+  if(totalInputQ>placedCount){
+    const usedLen=res.placed.length?Math.max(...res.placed.map(p=>p.x+p.length)):0;
+    const remaining=res.panel.length-usedLen;
 
-      const curQ=parseInt(parts[pi][ji].quantity)||1;
-      const adjustedQ=curQ-(totalInputQ-placedCount);
+    // Python 동일 메시지
+    let msg=`원자재의 용량이 부족하여 입력하신 조각 ${totalInputQ}개 중 ${placedCount}개만 배치되었습니다.\n치수나 수량을 다시 확인해주세요.`;
+    if(remaining<=0.1) msg="원자재의 잔여 길이가 0m입니다!\n더 이상 조각을 배치할 수 없습니다.";
 
-      showSizeOverModal(msg,()=>{
-        _validating=true;
-        if(adjustedQ>=1){
-          parts[pi][ji].quantity=adjustedQ;
+    // Python: adjustable_q = max(1, int(vars["quantity"].get() or 1) - (total_input_q - placed_count))
+    const curQ=parseInt(parts[pi][ji].quantity)||1;
+    const adjustedQ=Math.max(0, curQ-(totalInputQ-placedCount));
+
+    showSizeOverModal(msg,()=>{
+      _validating=true;
+      if(adjustedQ>=1){
+        // 수량 자동 조정 (Python: vars["quantity"].set(str(adjustable_q)))
+        parts[pi][ji].quantity=adjustedQ;
+      } else {
+        // 수량이 0 이하: 해당 행 치수 초기화 (Python: vars["length"/"width"].set(""))
+        parts[pi][ji].length=""; parts[pi][ji].width=""; parts[pi][ji].quantity=1;
+      }
+      rebuildSec(pi); schedCalc();
+      setTimeout(()=>{
+        _validating=false;
+        const t=document.getElementById(`ct_${pi}`);if(!t)return;
+        const r=t.querySelectorAll(".crow");if(!r[ji])return;
+        if(adjustedQ<1){
+          // 이름 셀로 포커스 (Python: widgets["name"].focus_set())
+          const inp=r[ji].querySelector('input[data-col="name"]');if(inp){inp.focus();inp.select();}
         } else {
-          parts[pi][ji].length=""; parts[pi][ji].width=""; parts[pi][ji].quantity=1;
+          // 수량 셀로 포커스 (Python: 수량 자동조정 완료 후)
+          const inp=r[ji].querySelector('input[data-col="quantity"]');if(inp){inp.focus();inp.select();}
         }
-        rebuildSec(pi); schedCalc();
-        setTimeout(()=>{
-          _validating=false;
-          const t=document.getElementById(`ct_${pi}`);if(!t)return;
-          const r=t.querySelectorAll(".crow");if(!r[ji])return;
-          if(adjustedQ<1){
-            const inp=r[ji].querySelector('input[data-col="name"]');if(inp){inp.focus();inp.select();}
-          } else {
-            const inp=r[ji].querySelector('input[data-col="quantity"]');if(inp){inp.focus();inp.select();}
-          }
-        },50);
-      });
-      return;
-    }
+      },50);
+    });
+    return;
   }
 
-  // ── 3. 정상 — 마지막 행이면 새 행 추가, 수량으로 포커스
+  // ── 3. 정상 — 마지막 행이면 새 행 추가, 그 외 수량으로 포커스
   const wasLast=ji===parts[pi].length-1;
-  if(wasLast) chkAddPart(pi,ji);
-  setTimeout(()=>moveFocusToQty(pi,ji),10);
+  const added=wasLast?chkAddPart(pi,ji):false;
+  // 새 행이 추가된 경우 addPart() 내부에서 포커스 처리 → 수량 이동 불필요
+  // 새 행 미추가 or 마지막 행 아닌 경우 → 수량 셀로 포커스
+  if(!added){
+    setTimeout(()=>moveFocusToQty(pi,ji),10);
+  }
 }
 function moveFocusToQty(pi,ji){
   const t=document.getElementById(`ct_${pi}`);if(!t)return;
   const rows=t.querySelectorAll(".crow");
-  if(rows[ji]){const qq=rows[ji].querySelector('input[data-col="quantity"]');if(qq){qq.focus();qq.select();}}
+  if(rows[ji]){const qq=rows[ji].querySelector('input[data-col="quantity"]');if(qq&&document.activeElement!==qq){qq.focus();qq.select();}}
 }
 
 // Size Over 모달 (확인 버튼 1개, 콜백 실행)
