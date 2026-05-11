@@ -1097,13 +1097,14 @@ function validateSize(pi,ji){
         parts[pi][ji].length=""; parts[pi][ji].width="";
         rebuildSec(pi); schedCalc();
         clearHint(pi,ji);
-        setTimeout(()=>{
-          const t=document.getElementById(`ct_${pi}`);
-          if(!t){ _validating=false; return; }
-          const r=t.querySelectorAll(".crow");
-          if(r[ji]){const inp=r[ji].querySelector('input[data-col="name"]');if(inp){inp.focus();inp.select();}}
-          setTimeout(()=>{ _validating=false; },80);
-        },60);
+        const t=document.getElementById(`ct_${pi}`);
+        if(!t){ _validating=false; return; }
+        const r=t.querySelectorAll(".crow");
+        if(r[ji]){
+          const inp=r[ji].querySelector('input[data-col="name"]');
+          if(inp){ inp.focus(); inp.select(); }
+        }
+        _validating=false;
       }
     );
     return;
@@ -1142,28 +1143,18 @@ function validateSize(pi,ji){
 
     _validating=true;
     showSizeOverModal(msg,()=>{
-      // ① 수량 데이터 먼저 저장 (rebuildSec이 이 값을 읽어서 렌더)
       parts[pi][ji].quantity=adjustedQ;
-
-      // ② 뷰 리셋
       cvX=0; cvY=0; cvS=1;
-
-      // ③ DOM 재생성
       rebuildSec(pi); schedCalc();
-
-      // ④ DOM 재생성 완료 후 포커스 — setTimeout으로 렌더링 완전 반영 대기
-      setTimeout(()=>{
-        const t=document.getElementById(`ct_${pi}`);
-        if(!t){ _validating=false; return; }
-        const rows=t.querySelectorAll(".crow");
-        const targetRow=rows[ji];
-        if(targetRow){
-          setHint(pi,ji,"info",`ℹ 수량이 ${adjustedQ}개로 자동 조정되었습니다`);
-          const inp=targetRow.querySelector('input[data-col="quantity"]');
-          if(inp){ inp.focus(); inp.select(); }
-        }
-        setTimeout(()=>{ _validating=false; },80);
-      },60);
+      const t=document.getElementById(`ct_${pi}`);
+      if(!t){ _validating=false; return; }
+      const rows=t.querySelectorAll(".crow");
+      if(rows[ji]){
+        setHint(pi,ji,"info",`ℹ 수량이 ${adjustedQ}개로 자동 조정되었습니다`);
+        const inp=rows[ji].querySelector('input[data-col="quantity"]');
+        if(inp){ inp.focus(); inp.select(); }
+      }
+      _validating=false;
     });
     return;
   }
@@ -1186,13 +1177,17 @@ function showSizeOverModal(msg,onOk){
   const mo=document.getElementById("soMo");
   document.getElementById("soMsg").textContent=msg;
   const okBtn=document.getElementById("soOk");
-  // 이전 핸들러 제거 후 새로 등록
   okBtn.onclick=()=>{
     mo.classList.remove("on");
-    if(onOk)onOk();
+    // 모달 DOM이 화면에서 완전히 사라진 뒤(2 프레임) 콜백 실행
+    // — 모달이 inset:0 으로 화면을 덮는 동안 focus()는 브라우저에 차단됨
+    requestAnimationFrame(()=>{
+      requestAnimationFrame(()=>{
+        if(onOk) onOk();
+      });
+    });
   };
   mo.classList.add("on");
-  // OK 버튼에 포커스 — onOk 콜백이 이후 포커스를 가져가므로 딜레이 없이 1회만
   okBtn.focus();
 }
 // Enter/Tab/화살표 키: 같은 열의 다음 행으로 이동 (마지막 행이면 다음 열로)
