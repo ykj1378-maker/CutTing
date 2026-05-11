@@ -178,6 +178,23 @@ body{font-family:var(--font);background:var(--bg);color:var(--tx);height:100vh;o
 .crow-hint.warn{display:flex;background:#FFF5F5;color:#C92A2A}
 .crow-hint.info{display:flex;background:#E7F5FF;color:#1864AB}
 .crow-hint.ok{display:flex;background:#F0FFF4;color:#2B8A3E}
+/* 힌트 깜빡임 */
+@keyframes hint-blink{0%,100%{background:#FFF5F5;color:#C92A2A}50%{background:#FFCCCC;color:#8B0000}}
+.crow-hint.warn.blink{animation:hint-blink 500ms step-end infinite}
+/* adj 조정 UI */
+.adj-cell{display:inline-flex;align-items:center;background:#F1F3F5;border:1px solid #CED4DA;border-radius:4px;overflow:hidden;height:22px;margin-left:8px}
+.adj-sign{background:none;border:none;border-right:1px solid #CED4DA;font-size:11px;font-weight:700;padding:0 6px;cursor:pointer;height:100%;color:#1971C2;font-family:var(--font)}
+.adj-sign.minus{color:#C92A2A}
+.adj-inp{width:36px;border:none;background:none;font-size:11px;text-align:center;padding:0 2px;font-family:var(--font);outline:none;color:#333}
+.adj-unit{font-size:10px;color:#868E96;padding:0 5px 0 1px}
+/* adj 드롭다운 팝업 */
+.adj-drop{position:fixed;z-index:9999;background:#fff;border:1px solid #CED4DA;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.15);min-width:90px;overflow:hidden;display:none}
+.adj-drop.on{display:block}
+.adj-drop button{display:block;width:100%;border:none;background:none;text-align:left;padding:7px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--font)}
+.adj-drop button:hover{background:#F8F9FA}
+/* adj 라벨 (행 아래) */
+.adj-label{font-size:10px;font-weight:600;padding:2px 8px;border-bottom:1px solid var(--ln);display:none}
+.adj-label.on{display:flex;align-items:center;gap:4px}
 
 /* 하단 버튼 */
 #BB{padding:9px 12px;border-top:1px solid var(--ln);display:flex;gap:7px;background:var(--fr);flex-shrink:0}
@@ -563,6 +580,10 @@ body{font-family:var(--font);background:var(--bg);color:var(--tx);height:100vh;o
 <input type="file" id="fileInp" accept=".json" style="display:none" onchange="onFileLoad(event)">
 
 <!-- Size Over 모달 -->
+<div class="adj-drop" id="adjDrop">
+  <button id="adjDropPlus" style="color:#1971C2">＋ 증가</button>
+  <button id="adjDropMinus" style="color:#C92A2A">－ 감소</button>
+</div>
 <div class="mo" id="soMo">
 <div class="mc" style="max-width:320px">
   <div class="mct" style="color:#E03131">⚠️ Size Over</div>
@@ -835,7 +856,50 @@ function buildSec(pi){
   no.addEventListener("click",()=>{const r=document.querySelectorAll("#panelTbl .prow");if(r[pi])r[pi].querySelector("input").focus();});
   const nm=document.createElement("span");nm.className="cname";nm.id=`sn_${pi}`;nm.textContent=panels[pi]?.name||"Film";
   const ab=document.createElement("button");ab.className="cadd";ab.textContent="+ 조각 추가";ab.addEventListener("click",()=>addPart(pi));
-  tr.append(no,nm,ab);
+
+  // ── adj 조정 UI ──────────────────────────────────────
+  const adjCell=document.createElement("div");adjCell.className="adj-cell";
+  const signBtn=document.createElement("button");signBtn.className="adj-sign";signBtn.textContent="+";signBtn.title="증가/감소 선택";
+  const adjInp=document.createElement("input");adjInp.className="adj-inp";adjInp.type="number";adjInp.min="0";adjInp.placeholder="0";adjInp.title="조정값(mm)";
+  const adjUnit=document.createElement("span");adjUnit.className="adj-unit";adjUnit.textContent="mm";
+  adjCell.append(signBtn,adjInp,adjUnit);
+
+  // 드롭다운 연동
+  signBtn.addEventListener("click",(e)=>{
+    e.stopPropagation();
+    const drop=document.getElementById("adjDrop");
+    const rect=signBtn.getBoundingClientRect();
+    drop.style.left=rect.left+"px";
+    drop.style.top=(rect.bottom+2)+"px";
+    drop.classList.toggle("on");
+    // 현재 모드 표시
+    document.getElementById("adjDropPlus").style.fontWeight=signBtn.dataset.mode==="-"?"400":"700";
+    document.getElementById("adjDropMinus").style.fontWeight=signBtn.dataset.mode==="-"?"700":"400";
+    // 외부 클릭 닫기
+    const close=()=>{drop.classList.remove("on");document.removeEventListener("click",close);};
+    setTimeout(()=>document.addEventListener("click",close),10);
+    document.getElementById("adjDropPlus").onclick=()=>{
+      signBtn.textContent="+";signBtn.className="adj-sign";signBtn.dataset.mode="+";
+      drop.classList.remove("on");_adjRefresh(pi);
+    };
+    document.getElementById("adjDropMinus").onclick=()=>{
+      signBtn.textContent="−";signBtn.className="adj-sign minus";signBtn.dataset.mode="-";
+      drop.classList.remove("on");_adjRefresh(pi);
+    };
+  });
+  adjInp.addEventListener("input",()=>_adjRefresh(pi));
+  signBtn.dataset.mode="+";
+  signBtn.dataset.pi=pi;
+  adjInp.dataset.pi=pi;
+  adjCell.dataset.pi=pi;
+  // 기존 저장값 복원
+  if(window._adjState&&window._adjState[pi]){
+    const s=window._adjState[pi];
+    adjInp.value=s.val||"";
+    if(s.mode==="-"){signBtn.textContent="−";signBtn.className="adj-sign minus";signBtn.dataset.mode="-";}
+  }
+
+  tr.append(no,nm,adjCell,ab);
   // 헤더
   const hdr=document.createElement("div");hdr.className="thdr";
   [["이름","flex:1.8;text-align:left;padding-left:4px;min-width:0"],["길이(mm)","width:100px;flex-shrink:0"],["폭(mm)","width:100px;flex-shrink:0"],["수량","width:50px;flex-shrink:0"],["색상","width:28px;flex-shrink:0"],["","width:22px;flex-shrink:0"]].forEach(([t,s])=>{
@@ -850,6 +914,9 @@ function buildSec(pi){
 function rebuildSec(pi){
   const tbl=document.getElementById(`ct_${pi}`);if(!tbl)return;
   tbl.innerHTML="";(parts[pi]||[]).forEach((_,ji)=>appendCRow(pi,ji,tbl));
+  // adj 라벨 갱신
+  const st=_adjGetState(pi);
+  (parts[pi]||[]).forEach((_,ji)=>_adjRefreshLabel(pi,ji,st));
 }
 function appendCRow(pi,ji,tbl){
   const pt=parts[pi][ji];
@@ -871,6 +938,7 @@ function appendCRow(pi,ji,tbl){
   l.addEventListener("blur",()=>{
     const v=l.value;
     parts[pi][ji].length=v===""?"":parseFloat(v)||"";
+    if(!_validating) validateSize(pi,ji);
   });
 
   // 폭 — blur 에서 validateSize 호출
@@ -910,6 +978,11 @@ function appendCRow(pi,ji,tbl){
   hint.className="crow-hint";
   hint.id=`hint_${pi}_${ji}`;
   tbl.appendChild(hint);
+  // adj 조정 라벨 행
+  const adjLbl=document.createElement("div");
+  adjLbl.className="adj-label";
+  adjLbl.id=`adjlbl_${pi}_${ji}`;
+  tbl.appendChild(adjLbl);
 }
 
 function addPart(pi){
@@ -936,12 +1009,55 @@ function chkAddPart(pi,ji){
   if(parseFloat(pt.length)>0&&parseFloat(pt.width)>0)addPart(pi);
 }
 
+/* ── adj 조정값 ── */
+// _adjState[pi] = {mode:"+"|"-", val:number}
+window._adjState = window._adjState||{};
+
+function _adjGetState(pi){
+  // DOM에서 현재 adj UI 값 읽기
+  const sec=document.getElementById(`cs_${pi}`);if(!sec)return{mode:"+",val:0};
+  const signBtn=sec.querySelector(".adj-sign");
+  const adjInp=sec.querySelector(".adj-inp");
+  const mode=signBtn?signBtn.dataset.mode||"+":"+";
+  const val=adjInp?parseFloat(adjInp.value)||0:0;
+  return{mode,val};
+}
+
+function _adjApply(origL,origW,mode,val){
+  if(mode==="+") return{l:origL+val,w:origW+val};
+  return{l:Math.max(1,origL-val),w:Math.max(1,origW-val)};
+}
+
+function _adjRefresh(pi){
+  // 현재 adj 상태를 _adjState에 저장
+  const st=_adjGetState(pi);
+  window._adjState[pi]=st;
+  // 모든 조각 행의 adj 라벨 갱신
+  (parts[pi]||[]).forEach((_,ji)=>_adjRefreshLabel(pi,ji,st));
+  schedCalc();
+}
+
+function _adjRefreshLabel(pi,ji,st){
+  const lbl=document.getElementById(`adjlbl_${pi}_${ji}`);if(!lbl)return;
+  if(!st)st=_adjGetState(pi);
+  const pt=parts[pi]&&parts[pi][ji];if(!pt)return;
+  const origL=parseFloat(pt.length)||0;
+  const origW=parseFloat(pt.width)||0;
+  if(!origL||!origW||!st.val){lbl.className="adj-label";lbl.textContent="";return;}
+  const{l,w}=_adjApply(origL,origW,st.mode,st.val);
+  const sign=st.mode==="+"?"+":"−";
+  const bg=st.mode==="+"?"#E7F5FF":"#FFF5F5";
+  const fg=st.mode==="+"?"#1864AB":"#C92A2A";
+  lbl.className="adj-label on";
+  lbl.style.background=bg;lbl.style.color=fg;
+  lbl.textContent=`원본 ${origL}×${origW}   →   적용${sign}${st.val}  ${l}×${w}`;
+}
+
 /* ── 힌트 메시지 표시/숨김 ── */
 function setHint(pi,ji,type,msg){
-  // type: "" | "warn" | "info" | "ok"
   const h=document.getElementById(`hint_${pi}_${ji}`);
   if(!h)return;
-  h.className="crow-hint"+(type?" "+type:"");
+  h.className="crow-hint"+(type?" "+type:"")+(type==="warn"?" blink":"");
   h.textContent=msg||"";
 }
 function clearHint(pi,ji){setHint(pi,ji,"","");}
@@ -967,19 +1083,21 @@ function validateSize(pi,ji){
   // ── 1. 크기 초과 검사 (회전 고려)
   if(Math.max(l,w)>Math.max(pl,pw) || Math.min(l,w)>Math.min(pl,pw)){
     setHint(pi,ji,"warn","⚠ 조각이 원자재보다 큽니다 — 치수 초기화됨");
-    _validating=true;
+    _validating=true; // 모달 표시 전 즉시 설정 — blur 재진입 차단
     showSizeOverModal(
       "조각이 원자재(Film)보다 큽니다!\n치수를 다시 확인해주세요.",
       ()=>{
+        // _validating은 여기서도 true 유지 — rebuildSec 중 blur 재진입 방지
         parts[pi][ji].length=""; parts[pi][ji].width="";
         rebuildSec(pi); schedCalc();
-        setTimeout(()=>{
-          _validating=false;
-          clearHint(pi,ji);
-          const t=document.getElementById(`ct_${pi}`);if(!t)return;
+        clearHint(pi,ji);
+        const t=document.getElementById(`ct_${pi}`);
+        if(t){
           const r=t.querySelectorAll(".crow");
           if(r[ji]){const inp=r[ji].querySelector('input[data-col="name"]');if(inp){inp.focus();inp.select();}}
-        },60);
+        }
+        // rebuildSec·포커스 완전 정착 후 해제
+        setTimeout(()=>{ _validating=false; },120);
       }
     );
     return;
@@ -1015,27 +1133,32 @@ function validateSize(pi,ji){
       setHint(pi,ji,"warn","⚠ 원자재 용량 초과 — 치수 초기화됨");
     }
 
-    _validating=true;
+    _validating=true; // 모달 표시 전 즉시 설정 — blur 재진입 차단
     showSizeOverModal(msg,()=>{
+      // _validating은 여기서도 true 유지 — rebuildSec 중 blur 재진입 방지
       if(adjustedQ>=1){
         parts[pi][ji].quantity=adjustedQ;
       } else {
         parts[pi][ji].length=""; parts[pi][ji].width=""; parts[pi][ji].quantity=1;
       }
+      // 뷰 리셋 — Python의 panel_states ox/oy=0, auto_center=True 대응
+      cvX=0; cvY=0; cvS=1;
       rebuildSec(pi); schedCalc();
-      setTimeout(()=>{
-        _validating=false;
-        const t=document.getElementById(`ct_${pi}`);if(!t)return;
-        const r=t.querySelectorAll(".crow");if(!r[ji])return;
-        if(adjustedQ>=1){
-          // 수량 자동 조정 완료 힌트 → 수량 셀 포커스
-          setHint(pi,ji,"info",`ℹ 수량이 ${adjustedQ}개로 자동 조정되었습니다`);
-          const inp=r[ji].querySelector('input[data-col="quantity"]');if(inp){inp.focus();inp.select();}
-        } else {
-          clearHint(pi,ji);
-          const inp=r[ji].querySelector('input[data-col="name"]');if(inp){inp.focus();inp.select();}
+      const t=document.getElementById(`ct_${pi}`);
+      if(t){
+        const r=t.querySelectorAll(".crow");
+        if(r[ji]){
+          if(adjustedQ>=1){
+            setHint(pi,ji,"info",`ℹ 수량이 ${adjustedQ}개로 자동 조정되었습니다`);
+            const inp=r[ji].querySelector('input[data-col="quantity"]');if(inp){inp.focus();inp.select();}
+          } else {
+            clearHint(pi,ji);
+            const inp=r[ji].querySelector('input[data-col="name"]');if(inp){inp.focus();inp.select();}
+          }
         }
-      },60);
+      }
+      // rebuildSec·포커스 완전 정착 후 해제
+      setTimeout(()=>{ _validating=false; },120);
     });
     return;
   }
@@ -1057,13 +1180,15 @@ function moveFocusToQty(pi,ji){
 function showSizeOverModal(msg,onOk){
   const mo=document.getElementById("soMo");
   document.getElementById("soMsg").textContent=msg;
-  document.getElementById("soOk").onclick=()=>{
+  const okBtn=document.getElementById("soOk");
+  okBtn.onclick=()=>{
     mo.classList.remove("on");
     if(onOk)onOk();
   };
   mo.classList.add("on");
-  // 확인 버튼으로 포커스 강제 이동 — 수량 셀이 포커스 가로채지 못하게
-  setTimeout(()=>{const ok=document.getElementById("soOk");if(ok)ok.focus();},30);
+  // 즉시 + 짧은 딜레이 두 번 포커스 — blur가 수량 셀을 가로채지 못하게
+  okBtn.focus();
+  setTimeout(()=>{ okBtn.focus(); },30);
 }
 // Enter/Tab/화살표 키: 같은 열의 다음 행으로 이동 (마지막 행이면 다음 열로)
 function cutKey(e,pi,ji,col){
@@ -1182,7 +1307,14 @@ function calcLayout(){
   results=[];
   panels.forEach((p,i)=>{
     if(!parseFloat(p.length)||!parseFloat(p.width))return;
-    const ps=(parts[i]||[]).filter(pt=>parseFloat(pt.length)>0&&parseFloat(pt.width)>0);
+    const st=_adjGetState(i);
+    const ps=(parts[i]||[]).filter(pt=>parseFloat(pt.length)>0&&parseFloat(pt.width)>0).map(pt=>{
+      if(st.val>0){
+        const{l,w}=_adjApply(parseFloat(pt.length),parseFloat(pt.width),st.mode,st.val);
+        return{...pt,length:l,width:w};
+      }
+      return pt;
+    });
     const r=bestFit({length:parseFloat(p.length),width:parseFloat(p.width),name:p.name},ps,p.grain);
     results.push({panel:{...p,length:parseFloat(p.length),width:parseFloat(p.width)},placed:r.placed,remaining:r.remaining});
   });
