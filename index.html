@@ -962,7 +962,7 @@ function appendCRow(pi,ji,tbl){
     if(_validating)return;
     const nq=Math.max(1,parseInt(q.value)||1);
     parts[pi][ji].quantity=nq; q.value=nq;
-    setTimeout(()=>validateSize(pi,ji),200);
+    schedCalc(); // 수량 blur: 계산만, 포커스 이동 없음
   });
 
   // 색상 — Tab 제외
@@ -1172,11 +1172,13 @@ function validateSize(pi,ji){
     return;
   }
 
-  // ── 3. 정상 — 마지막 행이면 새 행 추가, 수량으로 포커스
+  // ── 3. 정상 — 수량으로 포커스, 마지막 행이면 새 행도 추가
   clearHint(pi,ji);
-  const wasLast=ji===parts[pi].length-1;
+  const wasLast=(ji===parts[pi].length-1);
   if(wasLast) chkAddPart(pi,ji);
-  setTimeout(()=>moveFocusToQty(pi,ji),60);
+  // chkAddPart가 새 행 추가 후 name 포커스를 50ms 뒤에 하므로
+  // 수량 포커스는 그보다 먼저 (30ms)
+  setTimeout(()=>moveFocusToQty(pi,ji),30);
 }
 
 function moveFocusToQty(pi,ji){
@@ -1272,8 +1274,8 @@ function cutKey(e,pi,ji,col){
     return;
   }
 
-  // Tab: 수량→다음 행 이름 (색상·삭제 셀 건너뜀)
-  if(isTab&&col==="quantity"){
+  // Tab/Enter: 수량 → 다음 행 이름으로 이동
+  if(col==="quantity"&&(isTab||isEnter)){
     e.preventDefault();
     if(ji<rows.length-1){
       const inp=rows[ji+1].querySelector('input[data-col="name"]');
@@ -1284,15 +1286,12 @@ function cutKey(e,pi,ji,col){
   if(!isEnter)return;
   e.preventDefault();
   if(ji<rows.length-1){
-    // 다음 행의 같은 열
     const inp=rows[ji+1].querySelector(`input[data-col="${col}"]`);
     if(inp){inp.focus();inp.select();}
   } else if(curIdx<colOrder.length-1){
-    // 같은 행의 다음 열
     const inp=rows[ji].querySelector(`input[data-col="${colOrder[curIdx+1]}"]`);
     if(inp){inp.focus();inp.select();}
   }
-  // 마지막 셀 Enter 시 blur 이벤트가 chkAddPart를 트리거하므로 별도 처리 불필요
 }
 
 /* === DOM 헬퍼 === */
