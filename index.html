@@ -114,7 +114,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--tx);height:100vh;o
 #ML{flex:1;display:flex;overflow:hidden}
 
 /* 왼쪽 입력 */
-#LP{width:760px;min-width:280px;flex-shrink:0;background:var(--fr);border-right:1px solid var(--ln);display:flex;flex-direction:column;overflow:hidden}
+#LP{width:540px;min-width:280px;flex-shrink:0;background:var(--fr);border-right:1px solid var(--ln);display:flex;flex-direction:column;overflow:hidden}
 #RZ{width:5px;background:var(--ln);cursor:col-resize;flex-shrink:0;transition:background .15s}
 #RZ:hover{background:var(--ac)}
 #RP{flex:1;display:flex;flex-direction:column;background:var(--cv);overflow:hidden}
@@ -1125,6 +1125,7 @@ function calcLayout(){
   if(curFilm>=results.length)curFilm=Math.max(0,results.length-1);
   renderFTabs();drawCV();updIB();
 }
+function runCalc(){calcLayout();}  // validateSize에서 동기 계산용 alias
 function schedCalc(){clearTimeout(calcT);calcT=setTimeout(calcLayout,200);}
 
 /* === 캔버스 (PC앱 스타일 동일) === */
