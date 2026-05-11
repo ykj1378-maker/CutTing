@@ -173,6 +173,11 @@ body{font-family:var(--font);background:var(--bg);color:var(--tx);height:100vh;o
 .cadd{background:none;border:1px dashed var(--ln);color:var(--hd);padding:2px 9px;border-radius:4px;font-size:11px;cursor:pointer;font-family:var(--font)}
 .cadd:hover{border-color:var(--ac);color:var(--ac)}
 .ctbl{border:1px solid var(--ln);border-top:none;border-radius:0 0 5px 5px;overflow:hidden;margin-bottom:3px}
+/* 조각 행 아래 인라인 힌트/경고 메시지 */
+.crow-hint{font-size:10px;font-weight:600;padding:2px 8px 2px 10px;border-bottom:1px solid var(--ln);display:none;align-items:center;gap:4px}
+.crow-hint.warn{display:flex;background:#FFF5F5;color:#C92A2A}
+.crow-hint.info{display:flex;background:#E7F5FF;color:#1864AB}
+.crow-hint.ok{display:flex;background:#F0FFF4;color:#2B8A3E}
 
 /* 하단 버튼 */
 #BB{padding:9px 12px;border-top:1px solid var(--ln);display:flex;gap:7px;background:var(--fr);flex-shrink:0}
@@ -562,7 +567,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--tx);height:100vh;o
 <div class="mc" style="max-width:320px">
   <div class="mct" style="color:#E03131">⚠️ Size Over</div>
   <p id="soMsg" style="white-space:pre-line;font-size:13px;line-height:1.6;color:var(--tx);padding:4px 0 12px"></p>
-  <div class="mbs"><button class="mb_" id="soOk">확인</button></div>
+  <div class="mbs" style="justify-content:center"><button class="mb_ p" id="soOk" style="padding:8px 32px">확인</button></div>
 </div></div>
 
 <!-- 요약 팝업 모달 -->
@@ -849,6 +854,7 @@ function rebuildSec(pi){
 function appendCRow(pi,ji,tbl){
   const pt=parts[pi][ji];
   const row=document.createElement("div");row.className="crow";
+  row.dataset.pi=pi; row.dataset.ji=ji;
 
   // 이름
   const n=mkInp("ci","text",pt.name||"","조각명",v=>{parts[pi][ji].name=v;schedCalc();},"name");
@@ -863,7 +869,6 @@ function appendCRow(pi,ji,tbl){
   l.style.width="100px";
   l.addEventListener("keydown",e=>cutKey(e,pi,ji,"length"));
   l.addEventListener("blur",()=>{
-    // 길이 blur 시에도 DOM→parts 즉시 동기화
     const v=l.value;
     parts[pi][ji].length=v===""?"":parseFloat(v)||"";
   });
@@ -876,7 +881,7 @@ function appendCRow(pi,ji,tbl){
   w.style.width="100px";
   w.addEventListener("keydown",e=>cutKey(e,pi,ji,"width"));
   w.addEventListener("blur",()=>{
-    // 폭 blur 시 DOM→parts 즉시 동기화 후 검증
+    if(_validating)return;
     const vl=l.value,vw=w.value;
     parts[pi][ji].length=vl===""?"":parseFloat(vl)||"";
     parts[pi][ji].width=vw===""?"":parseFloat(vw)||"";
@@ -897,7 +902,14 @@ function appendCRow(pi,ji,tbl){
   // 삭제 — Tab 제외
   const del=mkBtn("delbtn","×",()=>removePart(pi,ji));del.tabIndex=-1;
 
-  row.append(n,l,w,q,cb,del);tbl.appendChild(row);
+  row.append(n,l,w,q,cb,del);
+  tbl.appendChild(row);
+
+  // 인라인 힌트 행 (행 바로 아래 표시)
+  const hint=document.createElement("div");
+  hint.className="crow-hint";
+  hint.id=`hint_${pi}_${ji}`;
+  tbl.appendChild(hint);
 }
 
 function addPart(pi){
@@ -924,23 +936,38 @@ function chkAddPart(pi,ji){
   if(parseFloat(pt.length)>0&&parseFloat(pt.width)>0)addPart(pi);
 }
 
+/* ── 힌트 메시지 표시/숨김 ── */
+function setHint(pi,ji,type,msg){
+  // type: "" | "warn" | "info" | "ok"
+  const h=document.getElementById(`hint_${pi}_${ji}`);
+  if(!h)return;
+  h.className="crow-hint"+(type?" "+type:"");
+  h.textContent=msg||"";
+}
+function clearHint(pi,ji){setHint(pi,ji,"","");}
+
 /* ── validateSize ── */
-let _validating=false; // 재진입 방지 플래그
+let _validating=false;
 
 function validateSize(pi,ji){
-  if(_validating)return; // 모달 열려있는 동안 blur 재진입 완전 차단
+  if(_validating)return;
+  if(!parts[pi]||!parts[pi][ji])return;
 
   const l=parseFloat(parts[pi][ji].length);
   const w=parseFloat(parts[pi][ji].width);
-  if(!l||!w){ moveFocusToQty(pi,ji); return; }
+
+  // 치수 미입력 → 힌트 지우고 수량으로 이동
+  if(!l||!w){ clearHint(pi,ji); moveFocusToQty(pi,ji); return; }
 
   const panel=panels[pi];
-  const pl=parseFloat(panel.length),pw=parseFloat(panel.width);
-  if(!pl||!pw){ moveFocusToQty(pi,ji); return; }
+  if(!panel){ clearHint(pi,ji); moveFocusToQty(pi,ji); return; }
+  const pl=parseFloat(panel.length), pw=parseFloat(panel.width);
+  if(!pl||!pw){ clearHint(pi,ji); moveFocusToQty(pi,ji); return; }
 
   // ── 1. 크기 초과 검사 (회전 고려)
-  if(Math.max(l,w)>Math.max(pl,pw)||Math.min(l,w)>Math.min(pl,pw)){
-    // showSizeOverModal 내부에서 _validating=true 처리
+  if(Math.max(l,w)>Math.max(pl,pw) || Math.min(l,w)>Math.min(pl,pw)){
+    setHint(pi,ji,"warn","⚠ 조각이 원자재보다 큽니다 — 치수 초기화됨");
+    _validating=true;
     showSizeOverModal(
       "조각이 원자재(Film)보다 큽니다!\n치수를 다시 확인해주세요.",
       ()=>{
@@ -948,10 +975,11 @@ function validateSize(pi,ji){
         rebuildSec(pi); schedCalc();
         setTimeout(()=>{
           _validating=false;
+          clearHint(pi,ji);
           const t=document.getElementById(`ct_${pi}`);if(!t)return;
           const r=t.querySelectorAll(".crow");
           if(r[ji]){const inp=r[ji].querySelector('input[data-col="name"]');if(inp){inp.focus();inp.select();}}
-        },50);
+        },60);
       }
     );
     return;
@@ -962,70 +990,79 @@ function validateSize(pi,ji){
   calcLayout();
 
   const res=results[pi];
-  if(res){
-    const totalInputQ=parts[pi].reduce((s,p)=>{
-      const pl2=parseFloat(p.length),pw2=parseFloat(p.width),pq=parseInt(p.quantity)||1;
-      return (pl2>0&&pw2>0)?s+pq:s;
-    },0);
-    const placedCount=res.placed.length;
+  if(!res){ clearHint(pi,ji); moveFocusToQty(pi,ji); return; }
 
-    if(totalInputQ>placedCount){
-      const usedLen=res.placed.length?Math.max(...res.placed.map(p=>p.x+p.length)):0;
-      const remaining=res.panel.length-usedLen;
+  const totalInputQ=parts[pi].reduce((s,p)=>{
+    const pl2=parseFloat(p.length),pw2=parseFloat(p.width),pq=parseInt(p.quantity)||1;
+    return (pl2>0&&pw2>0)?s+pq:s;
+  },0);
+  const placedCount=res.placed.length;
 
-      let msg=`원자재의 용량이 부족하여 입력하신 조각 ${totalInputQ}개 중 ${placedCount}개만 배치되었습니다.\n치수나 수량을 다시 확인해주세요.`;
-      if(remaining<=0.1) msg="원자재의 잔여 길이가 0m입니다!\n더 이상 조각을 배치할 수 없습니다.";
+  if(totalInputQ>placedCount){
+    const usedLen=res.placed.length?Math.max(...res.placed.map(p=>p.x+p.length)):0;
+    const remaining=res.panel.length-usedLen;
+    const curQ=parseInt(parts[pi][ji].quantity)||1;
+    const diff=totalInputQ-placedCount;
+    const adjustedQ=curQ-diff;
 
-      const curQ=parseInt(parts[pi][ji].quantity)||1;
-      const adjustedQ=curQ-(totalInputQ-placedCount);
+    let msg=`원자재의 용량이 부족하여 입력하신 조각 ${totalInputQ}개 중 ${placedCount}개만 배치되었습니다.\n치수나 수량을 다시 확인해주세요.`;
+    if(remaining<=0.1) msg="원자재의 잔여 길이가 0m입니다!\n더 이상 조각을 배치할 수 없습니다.";
 
-      // showSizeOverModal 내부에서 _validating=true 처리
-      showSizeOverModal(msg,()=>{
-        if(adjustedQ>=1){
-          parts[pi][ji].quantity=adjustedQ;
-        } else {
-          parts[pi][ji].length=""; parts[pi][ji].width=""; parts[pi][ji].quantity=1;
-        }
-        rebuildSec(pi); schedCalc();
-        setTimeout(()=>{
-          _validating=false;
-          const t=document.getElementById(`ct_${pi}`);if(!t)return;
-          const r=t.querySelectorAll(".crow");if(!r[ji])return;
-          if(adjustedQ<1){
-            const inp=r[ji].querySelector('input[data-col="name"]');if(inp){inp.focus();inp.select();}
-          } else {
-            const inp=r[ji].querySelector('input[data-col="quantity"]');if(inp){inp.focus();inp.select();}
-          }
-        },50);
-      });
-      return;
+    // 인라인 힌트: 자동 수량 조정 예고
+    if(adjustedQ>=1){
+      setHint(pi,ji,"warn",`⚠ 배치 불가 ${diff}개 초과 — 수량 자동조정: ${curQ} → ${adjustedQ}`);
+    } else {
+      setHint(pi,ji,"warn","⚠ 원자재 용량 초과 — 치수 초기화됨");
     }
+
+    _validating=true;
+    showSizeOverModal(msg,()=>{
+      if(adjustedQ>=1){
+        parts[pi][ji].quantity=adjustedQ;
+      } else {
+        parts[pi][ji].length=""; parts[pi][ji].width=""; parts[pi][ji].quantity=1;
+      }
+      rebuildSec(pi); schedCalc();
+      setTimeout(()=>{
+        _validating=false;
+        const t=document.getElementById(`ct_${pi}`);if(!t)return;
+        const r=t.querySelectorAll(".crow");if(!r[ji])return;
+        if(adjustedQ>=1){
+          // 수량 자동 조정 완료 힌트 → 수량 셀 포커스
+          setHint(pi,ji,"info",`ℹ 수량이 ${adjustedQ}개로 자동 조정되었습니다`);
+          const inp=r[ji].querySelector('input[data-col="quantity"]');if(inp){inp.focus();inp.select();}
+        } else {
+          clearHint(pi,ji);
+          const inp=r[ji].querySelector('input[data-col="name"]');if(inp){inp.focus();inp.select();}
+        }
+      },60);
+    });
+    return;
   }
 
   // ── 3. 정상 — 마지막 행이면 새 행 추가, 수량으로 포커스
+  clearHint(pi,ji);
   const wasLast=ji===parts[pi].length-1;
   if(wasLast) chkAddPart(pi,ji);
   setTimeout(()=>moveFocusToQty(pi,ji),10);
 }
+
 function moveFocusToQty(pi,ji){
   const t=document.getElementById(`ct_${pi}`);if(!t)return;
   const rows=t.querySelectorAll(".crow");
-  if(rows[ji]){const qq=rows[ji].querySelector('input[data-col="quantity"]');if(qq){qq.focus();qq.select();}}
+  if(rows[ji]){const qq=rows[ji].querySelector('input[data-col="quantity"]');if(qq&&document.activeElement!==qq){qq.focus();qq.select();}}
 }
 
-// Size Over 모달 (확인 버튼 1개, 콜백 실행)
+// Size Over 모달
 function showSizeOverModal(msg,onOk){
   const mo=document.getElementById("soMo");
   document.getElementById("soMsg").textContent=msg;
-  // ★ 모달이 열리는 즉시 _validating=true → 이후 blur 체인(수량 등)이 validateSize 재진입 차단
-  _validating=true;
   document.getElementById("soOk").onclick=()=>{
     mo.classList.remove("on");
     if(onOk)onOk();
-    // onOk 콜백 안에서 _validating 해제 타이밍을 제어하므로 여기선 건드리지 않음
   };
   mo.classList.add("on");
-  // 모달 확인 버튼으로 포커스 강제 이동 — 수량 셀이 포커스를 가로채지 못하게
+  // 확인 버튼으로 포커스 강제 이동 — 수량 셀이 포커스 가로채지 못하게
   setTimeout(()=>{const ok=document.getElementById("soOk");if(ok)ok.focus();},30);
 }
 // Enter/Tab/화살표 키: 같은 열의 다음 행으로 이동 (마지막 행이면 다음 열로)
