@@ -387,6 +387,12 @@ body{font-family:var(--font);background:var(--bg);color:var(--tx);height:100vh;o
 <div id="RP">
   <div id="CT">
     <div class="ftabs" id="filmTabs"></div>
+    <button class="zvbtn" id="btnTurn" onclick="doTurn()" title="Turn — 좌우 반전" style="width:42px;font-size:11px;font-weight:700">Turn</button>
+    <div style="display:flex;border:1px solid var(--ln);border-radius:5px;overflow:hidden;flex-shrink:0;height:27px">
+      <button id="btnFlipX" onclick="doFlip('x')" title="Flip X — 가로↔세로" style="width:36px;font-size:10px;font-weight:700;border:none;background:var(--cv);color:var(--tx);cursor:pointer;font-family:var(--font)">⇔X</button>
+      <div style="width:1px;background:var(--ln)"></div>
+      <button id="btnFlipY" onclick="doFlip('y')" title="Flip Y — 상하 반전" style="width:36px;font-size:10px;font-weight:700;border:none;background:var(--cv);color:var(--tx);cursor:pointer;font-family:var(--font)">⇕Y</button>
+    </div>
     <button class="zvbtn" onclick="zoom(1.2)" title="확대">+</button>
     <button class="zvbtn" onclick="zoom(0.8)" title="축소">−</button>
     <button class="zvbtn" onclick="resetZoom()" title="리셋">⟳</button>
@@ -616,7 +622,7 @@ function fd(mm){
 function fdPanel(mm){
   const v=parseFloat(mm)||0;
   if(v<=0)return "?";
-  return Math.round(v)+"mm";
+  return Math.round(v)+"(mm)";
 }
 function esc(s){return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
 function tod(){return new Date().toISOString().split("T")[0];}
@@ -624,6 +630,7 @@ function tod(){return new Date().toISOString().split("T")[0];}
 /* === 상태 === */
 let panels=[],parts=[],results=[];
 let curFilm=0,cvS=1,cvX=0,cvY=0,fS=1,fX=0,fY=0,fF=0;
+let flipX=[],flipY=[],turnSt=[]; // PC앱 flip_x/flip_y/turn_states
 let calcT=null,CU="",_cTgt={pi:-1,ji:-1};
 let lineMode=false,gridMode=false;
 let _sumBox=null;   // 메인 캔버스 요약 박스 좌표
@@ -719,11 +726,14 @@ function showLE(m){const e=document.getElementById("lerr");e.textContent=m;e.cla
 function addPanel(d={}){
   panels.push({name:d.name||"",length:d.length||"",width:d.width||"",grain:d.grain||false});
   parts.push([{name:"",length:"",width:"",quantity:1,color:nc()}]);
+  flipX.push(false);flipY.push(false);turnSt.push(false);
   renderPanelTbl();renderPartsSecs();schedCalc();
 }
 function removePanel(i){
   if(panels.length<=1){toast("Film은 최소 1개 필요합니다");return;}
-  panels.splice(i,1);parts.splice(i,1);renderPanelTbl();renderPartsSecs();schedCalc();
+  panels.splice(i,1);parts.splice(i,1);
+  flipX.splice(i,1);flipY.splice(i,1);turnSt.splice(i,1);
+  renderPanelTbl();renderPartsSecs();schedCalc();
 }
 function renderPanelTbl(){
   const tbl=document.getElementById("panelTbl");tbl.innerHTML="";
@@ -1385,8 +1395,21 @@ function calcLayout(){
       }
       return pt;
     });
-    const r=bestFit({length:parseFloat(p.length),width:parseFloat(p.width),name:p.name},ps,p.grain);
-    results.push({panel:{...p,length:parseFloat(p.length),width:parseFloat(p.width)},placed:r.placed,remaining:r.remaining});
+    // PC앱: flipX → 길이/폭 교환, flipY → 상하반전, turnSt → 좌우반전
+    let pLen=parseFloat(p.length),pWid=parseFloat(p.width);
+    const fx=flipX[i]||false,fy=flipY[i]||false,tu=turnSt[i]||false;
+    if(fx){const tmp=pLen;pLen=pWid;pWid=tmp;} // X: 가로↔세로 교환
+    const r=bestFit({length:pLen,width:pWid,name:p.name},ps,p.grain);
+    let{placed,remaining}=r;
+    if(fy){ // Y: 상하 반전
+      placed=placed.map(q=>({...q,y:pWid-q.y-q.width}));
+      remaining=remaining.map(([ax,ay,aw,ah])=>[ax,pWid-ay-ah,aw,ah]);
+    }
+    if(tu){ // Turn: 좌우 반전
+      placed=placed.map(q=>({...q,x:pLen-q.x-q.length}));
+      remaining=remaining.map(([ax,ay,aw,ah])=>[pLen-ax-aw,ay,aw,ah]);
+    }
+    results.push({panel:{...p,length:pLen,width:pWid},placed,remaining});
   });
   if(curFilm>=results.length)curFilm=Math.max(0,results.length-1);
 
@@ -1558,10 +1581,38 @@ function renderFTabs(){
   const w=document.getElementById("filmTabs");w.innerHTML="";
   results.forEach((r,i)=>{
     const b=document.createElement("button");b.className="ftab"+(i===curFilm?" on":"");b.textContent=r.panel.name||"Film"+(i+1);
-    b.addEventListener("click",()=>{curFilm=i;cvS=1;cvX=0;cvY=0;renderFTabs();drawCV();});w.appendChild(b);
+    b.addEventListener("click",()=>{curFilm=i;cvS=1;cvX=0;cvY=0;renderFTabs();_updFlipBtns();drawCV();});w.appendChild(b);
   });
 }
 function zoom(f){cvS*=f;drawCV();}function resetZoom(){cvS=1;cvX=0;cvY=0;drawCV();}
+
+// PC앱 toggle_turn / toggle_flip 동일
+function doTurn(){
+  if(curFilm<0||curFilm>=panels.length)return;
+  while(turnSt.length<=curFilm)turnSt.push(false);
+  turnSt[curFilm]=!turnSt[curFilm];
+  _updFlipBtns();schedCalc();
+}
+function doFlip(axis){
+  if(curFilm<0||curFilm>=panels.length)return;
+  while(flipX.length<=curFilm)flipX.push(false);
+  while(flipY.length<=curFilm)flipY.push(false);
+  if(axis==="x")flipX[curFilm]=!flipX[curFilm];
+  else           flipY[curFilm]=!flipY[curFilm];
+  _updFlipBtns();schedCalc();
+}
+function _updFlipBtns(){
+  const i=curFilm;
+  const bt=document.getElementById("btnTurn");
+  const bx=document.getElementById("btnFlipX");
+  const by=document.getElementById("btnFlipY");
+  const on_s="background:var(--bb);color:#fff;";
+  const off_s="background:var(--cv);color:var(--tx);";
+  if(bt){bt.style.cssText=bt.style.cssText.replace(/background[^;]+;|color[^;]+;/g,"");
+    bt.style.background=(turnSt[i])?"var(--bb)":"var(--cv)";bt.style.color=(turnSt[i])?"#fff":"var(--tx)";}
+  if(bx){bx.style.background=(flipX[i])?"var(--bb)":"var(--cv)";bx.style.color=(flipX[i])?"#fff":"var(--tx)";}
+  if(by){by.style.background=(flipY[i])?"var(--bb)":"var(--cv)";by.style.color=(flipY[i])?"#fff":"var(--tx)";}
+}
 
 /* === 정보바 === */
 function updIB(){
@@ -2248,12 +2299,17 @@ function getPD(){
   return{
     site_name:document.getElementById("siteName").value,
     panels:panels.map(p=>({name:p.name,length:+p.length,width:+p.width,grain:p.grain})),
+    flipX:flipX.slice(),flipY:flipY.slice(),turnSt:turnSt.slice(),
     parts:parts.map(ps=>ps.map(p=>({name:p.name,length:+p.length,width:+p.width,quantity:+p.quantity||1,color:p.color})))
   };
 }
 function loadPD(data){
   document.getElementById("siteName").value=data.site_name||"";cidx=0;
   panels=(data.panels||[]).map(p=>({name:p.name||"",length:p.length||"",width:p.width||"",grain:p.grain||false}));
+  flipX=(data.flipX||[]).map(v=>!!v);flipY=(data.flipY||[]).map(v=>!!v);turnSt=(data.turnSt||[]).map(v=>!!v);
+  while(flipX.length<panels.length)flipX.push(false);
+  while(flipY.length<panels.length)flipY.push(false);
+  while(turnSt.length<panels.length)turnSt.push(false);
   parts=(data.parts||[]).map(ps=>ps.map(p=>({name:p.name||"",length:p.length||"",width:p.width||"",quantity:p.quantity||1,color:p.color||nc()})));
   if(!panels.length){panels=[{name:"",length:"",width:"",grain:false}];parts=[[{name:"",length:"",width:"",quantity:1,color:nc()}]];}
   renderPanelTbl();document.getElementById("partsSecs").innerHTML="";
