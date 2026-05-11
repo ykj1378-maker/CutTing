@@ -949,13 +949,15 @@ function appendCRow(pi,ji,tbl){
   w.style.width="100px";
   w.addEventListener("keydown",e=>cutKey(e,pi,ji,"width"));
   w._keyExit=false;
-  w.addEventListener("keydown",e=>{if(e.key==="Tab"||e.key==="Enter")w._keyExit=true;});
+  w.addEventListener("keydown",e=>{
+    if(e.key==="Tab"||e.key==="Enter") w._keyExit=true;
+  });
   w.addEventListener("blur",()=>{
     if(_validating)return;
     const vl=l.value,vw=w.value;
     parts[pi][ji].length=vl===""?"":parseFloat(vl)||"";
     parts[pi][ji].width=vw===""?"":parseFloat(vw)||"";
-    if(w._keyExit){w._keyExit=false;return;} // cutKey에서 처리하므로 생략
+    if(w._keyExit){w._keyExit=false;return;}
     validateSize(pi,ji);
   });
 
@@ -1114,13 +1116,8 @@ function validateSize(pi,ji){
             if(nInp){ nInp.focus(); nInp.select(); }
           }
         }
-        schedCalc();
         _validating=false;
-        requestAnimationFrame(()=>{
-          const t2=document.getElementById("ct_"+pi);if(!t2)return;
-          const r2=t2.querySelectorAll(".crow");
-          if(r2[ji]){const n=r2[ji].querySelector('input[data-col="name"]');if(n){n.focus();n.select();}}
-        });
+        schedCalc();
       }
     );
     return;
@@ -1148,24 +1145,27 @@ function validateSize(pi,ji){
     const ptL=parseFloat(parts[pi][ji].length)||0;
     const ptW=parseFloat(parts[pi][ji].width)||0;
 
-    // 수량 즉시 자동 조정 — 모달 없이 힌트만 표시
-    parts[pi][ji].quantity=adjustedQ;
-    const t=document.getElementById("ct_"+pi);
-    if(t){
-      const rows=t.querySelectorAll(".crow");
-      if(rows[ji]){
-        const qInp=rows[ji].querySelector('input[data-col="quantity"]');
-        if(qInp) qInp.value=adjustedQ;
+    setHint(pi,ji,"warn","⚠ Warning  "+Math.round(ptL)+"×"+Math.round(ptW)+"  수량 "+diff+"개");
+
+    let msg="원자재의 용량이 부족하여 입력하신 조각 "+totalInputQ+"개 중 "+placedCount+"개만 배치되었습니다.\n치수나 수량을 다시 확인해주세요.";
+    if(remaining<=0.1) msg="원자재의 잔여 길이가 0m입니다!\n더 이상 조각을 배치할 수 없습니다.";
+
+    _validating=true;
+    showSizeOverModal(msg,()=>{
+      parts[pi][ji].quantity=adjustedQ;
+      const t2=document.getElementById("ct_"+pi);
+      if(t2){
+        const r2=Array.from(t2.querySelectorAll(".crow"));
+        if(r2[ji]){
+          const qInp=r2[ji].querySelector('input[data-col="quantity"]');
+          if(qInp) qInp.value=adjustedQ;
+        }
       }
-    }
-    if(remaining<=0.1){
-      setHint(pi,ji,"warn","⚠ 잔여 길이 0m — 더 이상 배치 불가");
-    } else {
-      setHint(pi,ji,"warn","⚠ "+Math.round(ptL)+"×"+Math.round(ptW)+" 수량 "+diff+"개 초과 → "+adjustedQ+"개로 자동 조정");
-    }
-    schedCalc();
-    // 수량 셀로 즉시 포커스 — 포커스 이동 막힘 없음
-    requestAnimationFrame(()=>moveFocusToQty(pi,ji));
+      setHint(pi,ji,"info","ℹ 수량이 "+adjustedQ+"개로 자동 조정되었습니다");
+      schedCalc();
+      _validating=false;
+      setTimeout(()=>moveFocusToQty(pi,ji),0);
+    });
     return;
   }
 
@@ -1175,12 +1175,11 @@ function validateSize(pi,ji){
   if(wasLast) chkAddPart(pi,ji);
   setTimeout(()=>moveFocusToQty(pi,ji),60);
 }
-
 function moveFocusToQty(pi,ji){
   if(_validating)return;
   const t=document.getElementById("ct_"+pi);if(!t)return;
-  const rows=t.querySelectorAll(".crow");
-  if(rows[ji]){
+  const rows=Array.from(t.querySelectorAll(".crow"));
+  if(ji>=0&&ji<rows.length){
     const qq=rows[ji].querySelector('input[data-col="quantity"]');
     if(qq){qq.focus();qq.select();}
   }
