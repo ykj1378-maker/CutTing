@@ -862,7 +862,7 @@ function appendCRow(pi,ji,tbl){
   const w=mkInp("ci","number",pt.width||"","mm",v=>{parts[pi][ji].width=+v;schedCalc();},"width");
   w.style.width="100px";
   w.addEventListener("keydown",e=>cutKey(e,pi,ji,"width"));
-  w.addEventListener("blur",()=>validateSize(pi,ji,w));
+  w.addEventListener("blur",()=>validateSize(pi,ji));
   // 수량 (50px)
   const q=mkInp("ci","number",pt.quantity||1,"수량",null,"quantity");
   q.min="1";q.style.width="50px";
@@ -904,11 +904,23 @@ function chkAddPart(pi,ji){
    1. 조각이 원자재보다 크면 → 오류 모달 + 길이·폭 초기화 + 이름으로 포커스
    2. 배치 가능 수량 초과 시 → 오류 모달 + 수량 자동 조정
    3. 정상이면 → 수량 셀로 포커스 + 마지막 행이면 자동 행 추가               */
-function validateSize(pi,ji,wEl){
-  const pt=parts[pi][ji];
-  const l=parseFloat(pt.length),w=parseFloat(pt.width);
+function validateSize(pi,ji){
+  // ── DOM에서 직접 최신값 읽기 (클로저 캡처 문제 방지) ──────────────
+  const t=document.getElementById(`ct_${pi}`);if(!t)return;
+  const rows=t.querySelectorAll(".crow");if(!rows[ji])return;
+  const lInp=rows[ji].querySelector('input[data-col="length"]');
+  const wInp=rows[ji].querySelector('input[data-col="width"]');
+  const qInp=rows[ji].querySelector('input[data-col="quantity"]');
+
+  // DOM값을 parts에 즉시 동기화 (input 이벤트 딜레이 우회)
+  if(lInp) parts[pi][ji].length=parseFloat(lInp.value)||"";
+  if(wInp) parts[pi][ji].width=parseFloat(wInp.value)||"";
+  if(qInp) parts[pi][ji].quantity=Math.max(1,parseInt(qInp.value)||1);
+
+  const l=parseFloat(parts[pi][ji].length);
+  const w=parseFloat(parts[pi][ji].width);
+
   if(!l||!w){
-    // 길이나 폭 미입력 — 수량으로만 이동
     moveFocusToQty(pi,ji); return;
   }
 
@@ -923,11 +935,10 @@ function validateSize(pi,ji,wEl){
       ()=>{
         parts[pi][ji].length=""; parts[pi][ji].width="";
         rebuildSec(pi); schedCalc();
-        // 이름 셀로 포커스
         setTimeout(()=>{
-          const t=document.getElementById(`ct_${pi}`);if(!t)return;
-          const rows=t.querySelectorAll(".crow");
-          if(rows[ji]){const n=rows[ji].querySelector('input[data-col="name"]');if(n){n.focus();n.select();}}
+          const t2=document.getElementById(`ct_${pi}`);if(!t2)return;
+          const r2=t2.querySelectorAll(".crow");
+          if(r2[ji]){const n=r2[ji].querySelector('input[data-col="name"]');if(n){n.focus();n.select();}}
         },30);
       }
     );
@@ -935,11 +946,12 @@ function validateSize(pi,ji,wEl){
   }
 
   // ── 2. 배치 가능 수량 초과 검사 ────────────────────────────────────
-  // 먼저 레이아웃을 계산하여 최신 결과 확보
-  runCalc();
+  // 대기 중인 schedCalc 타이머를 취소하고 즉시 동기 계산
+  clearTimeout(calcT);
+  calcLayout();
+
   const res=results[pi];
   if(res){
-    // 전체 입력된 유효 조각 수량 합계
     const totalInputQ=parts[pi].reduce((s,p)=>{
       const pl2=parseFloat(p.length),pw2=parseFloat(p.width),pq=parseInt(p.quantity)||1;
       return (pl2>0&&pw2>0)?s+pq:s;
@@ -954,25 +966,25 @@ function validateSize(pi,ji,wEl){
       let msg=`원자재의 용량이 부족하여 입력하신 조각 ${totalInputQ}개 중 ${placedCount}개만 배치되었습니다.\n치수나 수량을 다시 확인해주세요.`;
       if(remaining<=0.1) msg="원자재의 잔여 길이가 0m입니다!\n더 이상 조각을 배치할 수 없습니다.";
 
+      // 모달 표시 전에 조정값 미리 계산
+      const curQ=parseInt(parts[pi][ji].quantity)||1;
+      const over=totalInputQ-placedCount;
+      const adjustedQ=curQ-over;
+
       showSizeOverModal(msg,()=>{
-        const curQ=parseInt(pt.quantity)||1;
-        const over=totalInputQ-placedCount;
-        const adjustedQ=curQ-over;
         if(adjustedQ>=1){
           parts[pi][ji].quantity=adjustedQ;
         } else {
           parts[pi][ji].length=""; parts[pi][ji].width=""; parts[pi][ji].quantity=1;
         }
         rebuildSec(pi); schedCalc();
-        // 이름 셀로 포커스 (조각 초기화 시) 또는 수량 셀 유지
         setTimeout(()=>{
-          const t=document.getElementById(`ct_${pi}`);if(!t)return;
-          const rows=t.querySelectorAll(".crow");
-          if(!rows[ji])return;
+          const t2=document.getElementById(`ct_${pi}`);if(!t2)return;
+          const r2=t2.querySelectorAll(".crow");if(!r2[ji])return;
           if(adjustedQ<1){
-            const n=rows[ji].querySelector('input[data-col="name"]');if(n){n.focus();n.select();}
+            const n=r2[ji].querySelector('input[data-col="name"]');if(n){n.focus();n.select();}
           } else {
-            const qq=rows[ji].querySelector('input[data-col="quantity"]');if(qq){qq.focus();qq.select();}
+            const qq=r2[ji].querySelector('input[data-col="quantity"]');if(qq){qq.focus();qq.select();}
           }
         },30);
       });
@@ -985,9 +997,9 @@ function validateSize(pi,ji,wEl){
   if(wasLast&&l>0&&w>0){
     chkAddPart(pi,ji);
     setTimeout(()=>{
-      const t=document.getElementById(`ct_${pi}`);if(!t)return;
-      const rows=t.querySelectorAll(".crow");
-      if(rows[ji]){const qq=rows[ji].querySelector('input[data-col="quantity"]');if(qq){qq.focus();qq.select();}}
+      const t2=document.getElementById(`ct_${pi}`);if(!t2)return;
+      const r2=t2.querySelectorAll(".crow");
+      if(r2[ji]){const qq=r2[ji].querySelector('input[data-col="quantity"]');if(qq){qq.focus();qq.select();}}
     },10);
   } else {
     moveFocusToQty(pi,ji);
@@ -1125,7 +1137,6 @@ function calcLayout(){
   if(curFilm>=results.length)curFilm=Math.max(0,results.length-1);
   renderFTabs();drawCV();updIB();
 }
-function runCalc(){calcLayout();}  // validateSize에서 동기 계산용 alias
 function schedCalc(){clearTimeout(calcT);calcT=setTimeout(calcLayout,200);}
 
 /* === 캔버스 (PC앱 스타일 동일) === */
