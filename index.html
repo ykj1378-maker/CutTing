@@ -849,30 +849,54 @@ function rebuildSec(pi){
 function appendCRow(pi,ji,tbl){
   const pt=parts[pi][ji];
   const row=document.createElement("div");row.className="crow";
-  // 이름 (flex:1.8)
+
+  // 이름
   const n=mkInp("ci","text",pt.name||"","조각명",v=>{parts[pi][ji].name=v;schedCalc();},"name");
   n.style.flex="1.8";n.style.minWidth="0";
   n.addEventListener("keydown",e=>cutKey(e,pi,ji,"name"));
-  // 길이 (100px) — input은 저장만, blur에서 자동행 추가 체크
-  const l=mkInp("ci","number",pt.length||"","mm",v=>{parts[pi][ji].length=+v;schedCalc();},"length");
+
+  // 길이 — 빈 값은 "" 로 저장 (0 아닌 빈값 보존)
+  const l=mkInp("ci","number",pt.length||"","mm",v=>{
+    parts[pi][ji].length=v===""?"":parseFloat(v)||"";
+    schedCalc();
+  },"length");
   l.style.width="100px";
   l.addEventListener("keydown",e=>cutKey(e,pi,ji,"length"));
-  l.addEventListener("blur",()=>chkAddPart(pi,ji));
-  // 폭 (100px) — input은 저장만, blur에서 자동행 추가 체크
-  const w=mkInp("ci","number",pt.width||"","mm",v=>{parts[pi][ji].width=+v;schedCalc();},"width");
+  l.addEventListener("blur",()=>{
+    // 길이 blur 시에도 DOM→parts 즉시 동기화
+    const v=l.value;
+    parts[pi][ji].length=v===""?"":parseFloat(v)||"";
+  });
+
+  // 폭 — blur 에서 validateSize 호출
+  const w=mkInp("ci","number",pt.width||"","mm",v=>{
+    parts[pi][ji].width=v===""?"":parseFloat(v)||"";
+    schedCalc();
+  },"width");
   w.style.width="100px";
   w.addEventListener("keydown",e=>cutKey(e,pi,ji,"width"));
-  w.addEventListener("blur",()=>validateSize(pi,ji));
-  // 수량 (50px)
+  w.addEventListener("blur",()=>{
+    // 폭 blur 시 DOM→parts 즉시 동기화 후 검증
+    const vl=l.value,vw=w.value;
+    parts[pi][ji].length=vl===""?"":parseFloat(vl)||"";
+    parts[pi][ji].width=vw===""?"":parseFloat(vw)||"";
+    validateSize(pi,ji);
+  });
+
+  // 수량
   const q=mkInp("ci","number",pt.quantity||1,"수량",null,"quantity");
   q.min="1";q.style.width="50px";
-  q.addEventListener("input",()=>{parts[pi][ji].quantity=Math.max(1,+q.value);schedCalc();});
+  q.addEventListener("input",()=>{parts[pi][ji].quantity=Math.max(1,parseInt(q.value)||1);schedCalc();});
   q.addEventListener("keydown",e=>cutKey(e,pi,ji,"quantity"));
-  // 색상 (28px) — Tab 순환 제외
-  const cb=document.createElement("div");cb.className="cbtn";cb.tabIndex=-1;cb.style.cssText=`width:28px;height:28px;flex-shrink:0;background:${pt.color}`;
+
+  // 색상 — Tab 제외
+  const cb=document.createElement("div");cb.className="cbtn";cb.tabIndex=-1;
+  cb.style.cssText=`width:28px;height:28px;flex-shrink:0;background:${pt.color}`;
   cb.addEventListener("click",()=>{_cTgt={pi,ji};document.getElementById("colorMo").classList.add("on");});
-  // 삭제 (20px) — Tab 순환 제외
+
+  // 삭제 — Tab 제외
   const del=mkBtn("delbtn","×",()=>removePart(pi,ji));del.tabIndex=-1;
+
   row.append(n,l,w,q,cb,del);tbl.appendChild(row);
 }
 
@@ -905,30 +929,16 @@ function chkAddPart(pi,ji){
    2. 배치 가능 수량 초과 시 → 오류 모달 + 수량 자동 조정
    3. 정상이면 → 수량 셀로 포커스 + 마지막 행이면 자동 행 추가               */
 function validateSize(pi,ji){
-  // ── DOM에서 직접 최신값 읽기 (클로저 캡처 문제 방지) ──────────────
-  const t=document.getElementById(`ct_${pi}`);if(!t)return;
-  const rows=t.querySelectorAll(".crow");if(!rows[ji])return;
-  const lInp=rows[ji].querySelector('input[data-col="length"]');
-  const wInp=rows[ji].querySelector('input[data-col="width"]');
-  const qInp=rows[ji].querySelector('input[data-col="quantity"]');
-
-  // DOM값을 parts에 즉시 동기화 (input 이벤트 딜레이 우회)
-  if(lInp) parts[pi][ji].length=parseFloat(lInp.value)||"";
-  if(wInp) parts[pi][ji].width=parseFloat(wInp.value)||"";
-  if(qInp) parts[pi][ji].quantity=Math.max(1,parseInt(qInp.value)||1);
-
   const l=parseFloat(parts[pi][ji].length);
   const w=parseFloat(parts[pi][ji].width);
 
-  if(!l||!w){
-    moveFocusToQty(pi,ji); return;
-  }
+  if(!l||!w){ moveFocusToQty(pi,ji); return; }
 
   const panel=panels[pi];
   const pl=parseFloat(panel.length),pw=parseFloat(panel.width);
-  if(!pl||!pw){moveFocusToQty(pi,ji);return;}
+  if(!pl||!pw){ moveFocusToQty(pi,ji); return; }
 
-  // ── 1. 원천적 크기 초과 검사 (회전 고려) ──────────────────────────
+  // ── 1. 크기 초과 검사 (회전 고려) ─────────────────────────────────
   if(Math.max(l,w)>Math.max(pl,pw)||Math.min(l,w)>Math.min(pl,pw)){
     showSizeOverModal(
       "조각이 원자재(Film)보다 큽니다!\n치수를 다시 확인해주세요.",
@@ -936,17 +946,16 @@ function validateSize(pi,ji){
         parts[pi][ji].length=""; parts[pi][ji].width="";
         rebuildSec(pi); schedCalc();
         setTimeout(()=>{
-          const t2=document.getElementById(`ct_${pi}`);if(!t2)return;
-          const r2=t2.querySelectorAll(".crow");
-          if(r2[ji]){const n=r2[ji].querySelector('input[data-col="name"]');if(n){n.focus();n.select();}}
+          const t=document.getElementById(`ct_${pi}`);if(!t)return;
+          const r=t.querySelectorAll(".crow");
+          if(r[ji]){const inp=r[ji].querySelector('input[data-col="name"]');if(inp){inp.focus();inp.select();}}
         },30);
       }
     );
     return;
   }
 
-  // ── 2. 배치 가능 수량 초과 검사 ────────────────────────────────────
-  // 대기 중인 schedCalc 타이머를 취소하고 즉시 동기 계산
+  // ── 2. 수량 초과 검사 — 타이머 취소 후 즉시 계산 ─────────────────
   clearTimeout(calcT);
   calcLayout();
 
@@ -959,17 +968,14 @@ function validateSize(pi,ji){
     const placedCount=res.placed.length;
 
     if(totalInputQ>placedCount){
-      const panelLen=res.panel.length;
       const usedLen=res.placed.length?Math.max(...res.placed.map(p=>p.x+p.length)):0;
-      const remaining=panelLen-usedLen;
+      const remaining=res.panel.length-usedLen;
 
       let msg=`원자재의 용량이 부족하여 입력하신 조각 ${totalInputQ}개 중 ${placedCount}개만 배치되었습니다.\n치수나 수량을 다시 확인해주세요.`;
       if(remaining<=0.1) msg="원자재의 잔여 길이가 0m입니다!\n더 이상 조각을 배치할 수 없습니다.";
 
-      // 모달 표시 전에 조정값 미리 계산
       const curQ=parseInt(parts[pi][ji].quantity)||1;
-      const over=totalInputQ-placedCount;
-      const adjustedQ=curQ-over;
+      const adjustedQ=curQ-(totalInputQ-placedCount);
 
       showSizeOverModal(msg,()=>{
         if(adjustedQ>=1){
@@ -979,12 +985,12 @@ function validateSize(pi,ji){
         }
         rebuildSec(pi); schedCalc();
         setTimeout(()=>{
-          const t2=document.getElementById(`ct_${pi}`);if(!t2)return;
-          const r2=t2.querySelectorAll(".crow");if(!r2[ji])return;
+          const t=document.getElementById(`ct_${pi}`);if(!t)return;
+          const r=t.querySelectorAll(".crow");if(!r[ji])return;
           if(adjustedQ<1){
-            const n=r2[ji].querySelector('input[data-col="name"]');if(n){n.focus();n.select();}
+            const inp=r[ji].querySelector('input[data-col="name"]');if(inp){inp.focus();inp.select();}
           } else {
-            const qq=r2[ji].querySelector('input[data-col="quantity"]');if(qq){qq.focus();qq.select();}
+            const inp=r[ji].querySelector('input[data-col="quantity"]');if(inp){inp.focus();inp.select();}
           }
         },30);
       });
@@ -992,14 +998,14 @@ function validateSize(pi,ji){
     }
   }
 
-  // ── 3. 정상 — 수량 셀로 이동 + 마지막 행이면 새 행 추가 ───────────
+  // ── 3. 정상 — 수량으로 이동, 마지막 행이면 새 행 추가 ─────────────
   const wasLast=ji===parts[pi].length-1;
-  if(wasLast&&l>0&&w>0){
+  if(wasLast){
     chkAddPart(pi,ji);
     setTimeout(()=>{
-      const t2=document.getElementById(`ct_${pi}`);if(!t2)return;
-      const r2=t2.querySelectorAll(".crow");
-      if(r2[ji]){const qq=r2[ji].querySelector('input[data-col="quantity"]');if(qq){qq.focus();qq.select();}}
+      const t=document.getElementById(`ct_${pi}`);if(!t)return;
+      const r=t.querySelectorAll(".crow");
+      if(r[ji]){const inp=r[ji].querySelector('input[data-col="quantity"]');if(inp){inp.focus();inp.select();}}
     },10);
   } else {
     moveFocusToQty(pi,ji);
@@ -1129,10 +1135,10 @@ function bestFit(panel,pts,noRot=false){
 function calcLayout(){
   results=[];
   panels.forEach((p,i)=>{
-    if(!p.length||!p.width)return;
-    const ps=(parts[i]||[]).filter(pt=>pt.length>0&&pt.width>0);
-    const r=bestFit({length:+p.length,width:+p.width,name:p.name},ps,p.grain);
-    results.push({panel:{...p,length:+p.length,width:+p.width},placed:r.placed,remaining:r.remaining});
+    if(!parseFloat(p.length)||!parseFloat(p.width))return;
+    const ps=(parts[i]||[]).filter(pt=>parseFloat(pt.length)>0&&parseFloat(pt.width)>0);
+    const r=bestFit({length:parseFloat(p.length),width:parseFloat(p.width),name:p.name},ps,p.grain);
+    results.push({panel:{...p,length:parseFloat(p.length),width:parseFloat(p.width)},placed:r.placed,remaining:r.remaining});
   });
   if(curFilm>=results.length)curFilm=Math.max(0,results.length-1);
   renderFTabs();drawCV();updIB();
