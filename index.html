@@ -924,38 +924,40 @@ function chkAddPart(pi,ji){
   if(parseFloat(pt.length)>0&&parseFloat(pt.width)>0)addPart(pi);
 }
 
-/* ── validateSize: 원본 cutting_app.py의 validate_size 동일 로직 ──
-   1. 조각이 원자재보다 크면 → 오류 모달 + 길이·폭 초기화 + 이름으로 포커스
-   2. 배치 가능 수량 초과 시 → 오류 모달 + 수량 자동 조정
-   3. 정상이면 → 수량 셀로 포커스 + 마지막 행이면 자동 행 추가               */
+/* ── validateSize ── */
+let _validating=false; // 재진입 방지 플래그
+
 function validateSize(pi,ji){
+  if(_validating)return; // 모달 확인 후 rebuildSec 중 blur 재진입 차단
+
   const l=parseFloat(parts[pi][ji].length);
   const w=parseFloat(parts[pi][ji].width);
-
   if(!l||!w){ moveFocusToQty(pi,ji); return; }
 
   const panel=panels[pi];
   const pl=parseFloat(panel.length),pw=parseFloat(panel.width);
   if(!pl||!pw){ moveFocusToQty(pi,ji); return; }
 
-  // ── 1. 크기 초과 검사 (회전 고려) ─────────────────────────────────
+  // ── 1. 크기 초과 검사 (회전 고려)
   if(Math.max(l,w)>Math.max(pl,pw)||Math.min(l,w)>Math.min(pl,pw)){
     showSizeOverModal(
       "조각이 원자재(Film)보다 큽니다!\n치수를 다시 확인해주세요.",
       ()=>{
+        _validating=true;
         parts[pi][ji].length=""; parts[pi][ji].width="";
         rebuildSec(pi); schedCalc();
         setTimeout(()=>{
+          _validating=false;
           const t=document.getElementById(`ct_${pi}`);if(!t)return;
           const r=t.querySelectorAll(".crow");
           if(r[ji]){const inp=r[ji].querySelector('input[data-col="name"]');if(inp){inp.focus();inp.select();}}
-        },30);
+        },50);
       }
     );
     return;
   }
 
-  // ── 2. 수량 초과 검사 — 타이머 취소 후 즉시 계산 ─────────────────
+  // ── 2. 수량 초과 검사 — 즉시 계산
   clearTimeout(calcT);
   calcLayout();
 
@@ -978,6 +980,7 @@ function validateSize(pi,ji){
       const adjustedQ=curQ-(totalInputQ-placedCount);
 
       showSizeOverModal(msg,()=>{
+        _validating=true;
         if(adjustedQ>=1){
           parts[pi][ji].quantity=adjustedQ;
         } else {
@@ -985,6 +988,7 @@ function validateSize(pi,ji){
         }
         rebuildSec(pi); schedCalc();
         setTimeout(()=>{
+          _validating=false;
           const t=document.getElementById(`ct_${pi}`);if(!t)return;
           const r=t.querySelectorAll(".crow");if(!r[ji])return;
           if(adjustedQ<1){
@@ -992,21 +996,17 @@ function validateSize(pi,ji){
           } else {
             const inp=r[ji].querySelector('input[data-col="quantity"]');if(inp){inp.focus();inp.select();}
           }
-        },30);
+        },50);
       });
       return;
     }
   }
 
-  // ── 3. 정상 — 마지막 행이면 새 행 추가, 수량으로 포커스 ─────────────
+  // ── 3. 정상 — 마지막 행이면 새 행 추가, 수량으로 포커스
   const wasLast=ji===parts[pi].length-1;
-  if(wasLast){
-    chkAddPart(pi,ji);
-  }
-  // 새 행 추가(addPart 50ms) 전에 수량으로 먼저 이동
+  if(wasLast) chkAddPart(pi,ji);
   setTimeout(()=>moveFocusToQty(pi,ji),10);
 }
-
 function moveFocusToQty(pi,ji){
   const t=document.getElementById(`ct_${pi}`);if(!t)return;
   const rows=t.querySelectorAll(".crow");
