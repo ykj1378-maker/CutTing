@@ -953,7 +953,6 @@ function appendCRow(pi,ji,tbl){
     const vl=l.value,vw=w.value;
     parts[pi][ji].length=vl===""?"":parseFloat(vl)||"";
     parts[pi][ji].width=vw===""?"":parseFloat(vw)||"";
-    // 폭 blur 시 자동행 추가 조건 갖춰지면 먼저 체크, 그 후 validateSize
     validateSize(pi,ji);
   });
 
@@ -967,8 +966,9 @@ function appendCRow(pi,ji,tbl){
     if(_validating)return;
     const newQ=Math.max(1,parseInt(q.value)||1);
     parts[pi][ji].quantity=newQ;
-    q.value=newQ; // 값 정규화
-    validateSize(pi,ji);
+    q.value=String(newQ);
+    // 수량 변경만으로는 크기 초과 없음 — 계산만 트리거
+    schedCalc();
   });
 
   // 색상 — Tab 제외
@@ -1074,60 +1074,61 @@ function clearHint(pi,ji){setHint(pi,ji,"","");}
 /* ── validateSize ── */
 let _validating=false;
 
+function _focusQty(pi,ji){
+  const t=document.getElementById("ct_"+pi);if(!t)return;
+  const rows=Array.from(t.querySelectorAll(".crow"));
+  if(ji<0||ji>=rows.length)return;
+  const qq=rows[ji].querySelector('input[data-col="quantity"]');
+  if(qq){qq.focus();qq.select();}
+}
+function _focusName(pi,ji){
+  const t=document.getElementById("ct_"+pi);if(!t)return;
+  const rows=Array.from(t.querySelectorAll(".crow"));
+  if(ji<0||ji>=rows.length)return;
+  const nn=rows[ji].querySelector('input[data-col="name"]');
+  if(nn){nn.focus();nn.select();}
+}
+
 function validateSize(pi,ji){
   if(_validating)return;
   if(!parts[pi]||!parts[pi][ji])return;
-
   const l=parseFloat(parts[pi][ji].length);
   const w=parseFloat(parts[pi][ji].width);
-
-  // 치수 미입력 → 힌트 지우고 수량으로 이동
-  if(!l||!w){ clearHint(pi,ji); moveFocusToQty(pi,ji); return; }
-
+  if(!l||!w){ clearHint(pi,ji); _focusQty(pi,ji); return; }
   const panel=panels[pi];
-  if(!panel){ clearHint(pi,ji); moveFocusToQty(pi,ji); return; }
+  if(!panel||!panel.length||!panel.width){ clearHint(pi,ji); _focusQty(pi,ji); return; }
   const pl=parseFloat(panel.length), pw=parseFloat(panel.width);
-  if(!pl||!pw){ clearHint(pi,ji); moveFocusToQty(pi,ji); return; }
+  if(!pl||!pw){ clearHint(pi,ji); _focusQty(pi,ji); return; }
 
-  // ── 1. 크기 초과 검사 (회전 고려) — Python: max(l,w)>max(p_l,p_w) or min(l,w)>min(p_l,p_w)
+  // 1. 크기 초과 검사
   if(Math.max(l,w)>Math.max(pl,pw) || Math.min(l,w)>Math.min(pl,pw)){
-    // Python: setHint 없이 바로 messagebox.showerror → 치수 초기화 → name 포커스
     setHint(pi,ji,"warn","⚠ 조각이 원자재(Film)보다 큽니다 — 치수를 다시 확인해주세요");
     _validating=true;
     showSizeOverModal(
       "조각이 원자재(Film)보다 큽니다!\n치수를 다시 확인해주세요.",
       ()=>{
-        // 치수 데이터 초기화
         parts[pi][ji].length=""; parts[pi][ji].width="";
-
-        // DOM 재생성 없이 길이/폭 input만 직접 초기화
-        const t=document.getElementById(`ct_${pi}`);
+        const t=document.getElementById("ct_"+pi);
         if(t){
-          const rows=t.querySelectorAll(".crow");
+          const rows=Array.from(t.querySelectorAll(".crow"));
           if(rows[ji]){
-            const lInp=rows[ji].querySelector('input[data-col="length"]');
-            const wInp=rows[ji].querySelector('input[data-col="width"]');
-            const nInp=rows[ji].querySelector('input[data-col="name"]');
-            if(lInp) lInp.value="";
-            if(wInp) wInp.value="";
-            clearHint(pi,ji);
-            if(nInp){ nInp.focus(); nInp.select(); }
+            const lI=rows[ji].querySelector('input[data-col="length"]');
+            const wI=rows[ji].querySelector('input[data-col="width"]');
+            if(lI)lI.value="";
+            if(wI)wI.value="";
           }
         }
-        _validating=false;
-        schedCalc();
+        clearHint(pi,ji); schedCalc(); _validating=false;
+        requestAnimationFrame(()=>_focusName(pi,ji));
       }
     );
     return;
   }
 
-  // ── 2. 수량 초과 검사 — 즉시 계산
-  clearTimeout(calcT);
-  calcLayout();
-
+  // 2. 수량 초과 검사
+  clearTimeout(calcT); calcLayout();
   const res=results[pi];
-  if(!res){ clearHint(pi,ji); moveFocusToQty(pi,ji); return; }
-
+  if(!res){ clearHint(pi,ji); _focusQty(pi,ji); return; }
   const totalInputQ=parts[pi].reduce((s,p)=>{
     const pl2=parseFloat(p.length),pw2=parseFloat(p.width),pq=parseInt(p.quantity)||1;
     return (pl2>0&&pw2>0)?s+pq:s;
@@ -1139,68 +1140,41 @@ function validateSize(pi,ji){
     const remaining=res.panel.length-usedLen;
     const curQ=parseInt(parts[pi][ji].quantity)||1;
     const diff=totalInputQ-placedCount;
-
-    // ── Python: adjustable_q = max(1, curQ - diff) ──
-    // max(1, ...) 보정으로 항상 1 이상, 치수는 절대 건드리지 않음
-    const adjustedQ=Math.max(1, curQ-diff);
-
-    let msg=`원자재의 용량이 부족하여 입력하신 조각 ${totalInputQ}개 중 ${placedCount}개만 배치되었습니다.\n치수나 수량을 다시 확인해주세요.`;
-    if(remaining<=0.1) msg="원자재의 잔여 길이가 0m입니다!\n더 이상 조각을 배치할 수 없습니다.";
-
-    // 인라인 힌트 — Python: f"⚠ Warning  {l}×{w}  수량 {diff}개"
+    const adjustedQ=Math.max(1,curQ-diff);
+    let msg="원자재의 용량이 부족하여 입력하신 조각 "+totalInputQ+"개 중 "+placedCount+"개만 배치되었습니다.
+치수나 수량을 다시 확인해주세요.";
+    if(remaining<=0.1)msg="원자재의 잔여 길이가 0m입니다!
+더 이상 조각을 배치할 수 없습니다.";
     const ptL=parseFloat(parts[pi][ji].length)||0;
     const ptW=parseFloat(parts[pi][ji].width)||0;
-    setHint(pi,ji,"warn",`⚠ Warning  ${Math.round(ptL)}×${Math.round(ptW)}  수량 ${diff}개`);
-
+    setHint(pi,ji,"warn","⚠ Warning  "+Math.round(ptL)+"×"+Math.round(ptW)+"  수량 "+diff+"개");
     _validating=true;
     showSizeOverModal(msg,()=>{
-      // ① 데이터 저장 (chkAddPart/schedCalc 연쇄 막으려고 _validating 유지)
       parts[pi][ji].quantity=adjustedQ;
-      cvX=0; cvY=0; cvS=1;
-
-      // ② DOM 재생성 없이 수량 input.value만 직접 갱신
-      const t=document.getElementById(`ct_${pi}`);
-      let qInp=null;
+      cvX=0;cvY=0;cvS=1;
+      const t=document.getElementById("ct_"+pi);
       if(t){
-        const rows=t.querySelectorAll(".crow");
+        const rows=Array.from(t.querySelectorAll(".crow"));
         if(rows[ji]){
-          qInp=rows[ji].querySelector('input[data-col="quantity"]');
-          if(qInp) qInp.value=adjustedQ;
+          const qI=rows[ji].querySelector('input[data-col="quantity"]');
+          if(qI)qI.value=adjustedQ;
         }
       }
-      setHint(pi,ji,"info",`ℹ 수량이 ${adjustedQ}개로 자동 조정되었습니다`);
-
-      // ③ _validating 해제 후 포커스 이동 — blur 이벤트 재진입 완전 차단
-      setTimeout(()=>{
-        _validating=false;
-        schedCalc();
-        // 수량 입력란으로 포커스 이동
-        if(qInp){
-          qInp.focus();
-          qInp.select();
-        }
-      },50);
+      setHint(pi,ji,"info","ℹ 수량이 "+adjustedQ+"개로 자동 조정되었습니다");
+      schedCalc(); _validating=false;
+      requestAnimationFrame(()=>_focusQty(pi,ji));
     });
     return;
   }
 
-  // ── 3. 정상 — 마지막 행이면 새 행 추가, 수량으로 포커스
+  // 3. 정상
   clearHint(pi,ji);
-  const wasLast=ji===parts[pi].length-1;
+  const wasLast=(ji===parts[pi].length-1);
   if(wasLast) chkAddPart(pi,ji);
-  setTimeout(()=>moveFocusToQty(pi,ji),10);
+  requestAnimationFrame(()=>_focusQty(pi,ji));
 }
 
-function moveFocusToQty(pi,ji){
-  if(_validating)return;
-  const t=document.getElementById(`ct_${pi}`);if(!t)return;
-  const rows=t.querySelectorAll(".crow");
-  if(rows[ji]){
-    const qq=rows[ji].querySelector('input[data-col="quantity"]');
-    if(qq&&document.activeElement!==qq){qq.focus();qq.select();}
-  }
-}
-
+function moveFocusToQty(pi,ji){ _focusQty(pi,ji); }
 // Size Over 모달
 function showSizeOverModal(msg,onOk){
   const mo=document.getElementById("soMo");
@@ -1273,15 +1247,16 @@ function cutKey(e,pi,ji,col){
     return;
   }
 
-  // 폭 셀에서 Tab/Enter → validateSize 직접 호출 후 포커스 이동은 모달 확인 후 처리
+  // 폭 셀에서 Tab/Enter → DOM 동기화 후 validateSize (blur 이벤트 중복 방지)
   if(col==="width"&&(isTab||isEnter)){
     e.preventDefault();
-    // DOM→parts 즉시 동기화
     const wInp=rows[ji].querySelector('input[data-col="width"]');
     const lInp=rows[ji].querySelector('input[data-col="length"]');
     if(lInp){const v=lInp.value;parts[pi][ji].length=v===""?"":parseFloat(v)||"";}
     if(wInp){const v=wInp.value;parts[pi][ji].width=v===""?"":parseFloat(v)||"";}
-    validateSize(pi,ji);
+    // blur 이벤트가 뒤따라오지 않도록 _validating 잠금 후 validateSize
+    _validating=true;
+    setTimeout(()=>{_validating=false;validateSize(pi,ji);},0);
     return;
   }
 
