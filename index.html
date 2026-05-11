@@ -178,7 +178,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--tx);height:100vh;o
 .crow-hint.warn{display:flex;background:#FFF5F5;color:#C92A2A}
 .crow-hint.info{display:flex;background:#E7F5FF;color:#1864AB}
 .crow-hint.ok{display:flex;background:#F0FFF4;color:#2B8A3E}
-/* 힌트 깜빡임 제거 */
+/* 힌트 깜빡임 없음 */
 /* adj 조정 UI */
 .adj-cell{display:inline-flex;align-items:center;background:#F1F3F5;border:1px solid #CED4DA;border-radius:4px;overflow:hidden;height:22px;margin-left:8px}
 .adj-sign{background:none;border:none;border-right:1px solid #CED4DA;font-size:11px;font-weight:700;padding:0 6px;cursor:pointer;height:100%;color:#1971C2;font-family:var(--font)}
@@ -962,7 +962,6 @@ function appendCRow(pi,ji,tbl){
   q.min="1";q.style.width="50px";
   q.addEventListener("input",()=>{parts[pi][ji].quantity=Math.max(1,parseInt(q.value)||1);schedCalc();});
   q.addEventListener("keydown",e=>cutKey(e,pi,ji,"quantity"));
-  // 수량 blur → Python: quantity FocusOut도 validate_size 호출
   q.addEventListener("blur",()=>{
     if(_validating)return;
     const nq=Math.max(1,parseInt(q.value)||1);
@@ -1146,34 +1145,25 @@ function validateSize(pi,ji){
     let msg=`원자재의 용량이 부족하여 입력하신 조각 ${totalInputQ}개 중 ${placedCount}개만 배치되었습니다.\n치수나 수량을 다시 확인해주세요.`;
     if(remaining<=0.1) msg="원자재의 잔여 길이가 0m입니다!\n더 이상 조각을 배치할 수 없습니다.";
 
-    // 인라인 힌트 — Python: f"⚠ Warning  {l}×{w}  수량 {diff}개"
     const ptL=parseFloat(parts[pi][ji].length)||0;
     const ptW=parseFloat(parts[pi][ji].width)||0;
-    setHint(pi,ji,"warn","⚠ Warning  "+Math.round(ptL)+"×"+Math.round(ptW)+"  수량 "+diff+"개  부족");
 
-    // 모달 표시 전에 DOM qInp.value를 adjustedQ로 먼저 설정
-    // → 모달 열릴 때 blur가 발생해도 q.value=adjustedQ라서 덮어씌워도 동일값
+    // ★ blur보다 먼저: _validating=true + parts + DOM 모두 선반영
+    // 모달이 열리면서 blur 발생해도 _validating=true라 덮어쓰기 차단됨
+    _validating=true;
+    parts[pi][ji].quantity=adjustedQ;
     const tPre=document.getElementById("ct_"+pi);
     if(tPre){
-      const rowsPre=Array.from(tPre.querySelectorAll(".crow"));
-      if(rowsPre[ji]){
-        const qPre=rowsPre[ji].querySelector('input[data-col="quantity"]');
+      const rPre=Array.from(tPre.querySelectorAll(".crow"));
+      if(rPre[ji]){
+        const qPre=rPre[ji].querySelector('input[data-col="quantity"]');
         if(qPre) qPre.value=adjustedQ;
       }
     }
-    parts[pi][ji].quantity=adjustedQ; // parts도 미리 설정
-    _validating=true;
+
+    setHint(pi,ji,"warn","⚠ Warning  "+Math.round(ptL)+"×"+Math.round(ptW)+"  수량 "+diff+"개  부족");
+
     showSizeOverModal(msg,()=>{
-      // onOk: parts/DOM 이미 설정됨, 재확인만
-      const t=document.getElementById("ct_"+pi);
-      if(t){
-        const rows=Array.from(t.querySelectorAll(".crow"));
-        if(rows[ji]){
-          const qInp=rows[ji].querySelector('input[data-col="quantity"]');
-          if(qInp) qInp.value=adjustedQ;
-        }
-      }
-      setHint(pi,ji,"warn","⚠ Warning  "+Math.round(ptL)+"×"+Math.round(ptW)+"  수량 "+diff+"개  부족");
       schedCalc();
       _validating=false;
       setTimeout(()=>moveFocusToQty(pi,ji),0);
