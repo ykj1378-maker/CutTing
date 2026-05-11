@@ -554,6 +554,14 @@ body{font-family:var(--font);background:var(--bg);color:var(--tx);height:100vh;o
 
 <input type="file" id="fileInp" accept=".json" style="display:none" onchange="onFileLoad(event)">
 
+<!-- Size Over 모달 -->
+<div class="mo" id="soMo">
+<div class="mc" style="max-width:320px">
+  <div class="mct" style="color:#E03131">⚠️ Size Over</div>
+  <p id="soMsg" style="white-space:pre-line;font-size:13px;line-height:1.6;color:var(--tx);padding:4px 0 12px"></p>
+  <div class="mbs"><button class="mb_" id="soOk">확인</button></div>
+</div></div>
+
 <!-- 요약 팝업 모달 -->
 <div class="mo" id="sumMo">
 <div class="mc" style="max-width:340px">
@@ -851,26 +859,7 @@ function appendCRow(pi,ji,tbl){
   const w=mkInp("ci","number",pt.width||"","mm",v=>{parts[pi][ji].width=+v;schedCalc();},"width");
   w.style.width="100px";
   w.addEventListener("keydown",e=>cutKey(e,pi,ji,"width"));
-  w.addEventListener("blur",()=>{
-    const wasLast=ji===parts[pi].length-1;
-    const lenOk=parseFloat(parts[pi][ji].length)>0,widOk=parseFloat(parts[pi][ji].width)>0;
-    if(wasLast&&lenOk&&widOk){
-      // 자동 행 추가 → rebuildSec으로 DOM 재생성되므로 setTimeout으로 새 DOM에서 수량 찾기
-      chkAddPart(pi,ji);
-      // addPart 내부 setTimeout(50ms)이 새 마지막 행 이름으로 포커스를 줌 — 그 전에 수량으로 먼저 이동
-      setTimeout(()=>{
-        const t=document.getElementById(`ct_${pi}`);
-        if(!t)return;
-        const rows=t.querySelectorAll(".crow");
-        // ji행이 아직 존재하면 수량으로 이동 (새 행이 추가된 직후이므로 ji행은 유효)
-        if(rows[ji]){const qq=rows[ji].querySelector('input[data-col="quantity"]');if(qq){qq.focus();qq.select();}}
-      },10);
-    } else {
-      // 자동 추가 없음 → 수량 셀로 포커스
-      const t=document.getElementById(`ct_${pi}`);
-      if(t){const rows=t.querySelectorAll(".crow");const row=rows[ji];if(row){const qq=row.querySelector('input[data-col="quantity"]');if(qq){qq.focus();qq.select();}}}
-    }
-  });
+  w.addEventListener("blur",()=>validateSize(pi,ji,w));
   // 수량 (50px)
   const q=mkInp("ci","number",pt.quantity||1,"수량",null,"quantity");
   q.min="1";q.style.width="50px";
@@ -906,6 +895,114 @@ function chkAddPart(pi,ji){
   if(ji!==parts[pi].length-1)return;
   const pt=parts[pi][ji];
   if(parseFloat(pt.length)>0&&parseFloat(pt.width)>0)addPart(pi);
+}
+
+/* ── validateSize: 원본 cutting_app.py의 validate_size 동일 로직 ──
+   1. 조각이 원자재보다 크면 → 오류 모달 + 길이·폭 초기화 + 이름으로 포커스
+   2. 배치 가능 수량 초과 시 → 오류 모달 + 수량 자동 조정
+   3. 정상이면 → 수량 셀로 포커스 + 마지막 행이면 자동 행 추가               */
+function validateSize(pi,ji,wEl){
+  const pt=parts[pi][ji];
+  const l=parseFloat(pt.length),w=parseFloat(pt.width);
+  if(!l||!w){
+    // 길이나 폭 미입력 — 수량으로만 이동
+    moveFocusToQty(pi,ji); return;
+  }
+
+  const panel=panels[pi];
+  const pl=parseFloat(panel.length),pw=parseFloat(panel.width);
+  if(!pl||!pw){moveFocusToQty(pi,ji);return;}
+
+  // ── 1. 원천적 크기 초과 검사 (회전 고려) ──────────────────────────
+  if(Math.max(l,w)>Math.max(pl,pw)||Math.min(l,w)>Math.min(pl,pw)){
+    showSizeOverModal(
+      "조각이 원자재(Film)보다 큽니다!\n치수를 다시 확인해주세요.",
+      ()=>{
+        parts[pi][ji].length=""; parts[pi][ji].width="";
+        rebuildSec(pi); schedCalc();
+        // 이름 셀로 포커스
+        setTimeout(()=>{
+          const t=document.getElementById(`ct_${pi}`);if(!t)return;
+          const rows=t.querySelectorAll(".crow");
+          if(rows[ji]){const n=rows[ji].querySelector('input[data-col="name"]');if(n){n.focus();n.select();}}
+        },30);
+      }
+    );
+    return;
+  }
+
+  // ── 2. 배치 가능 수량 초과 검사 ────────────────────────────────────
+  // 먼저 레이아웃을 계산하여 최신 결과 확보
+  runCalc();
+  const res=results[pi];
+  if(res){
+    // 전체 입력된 유효 조각 수량 합계
+    const totalInputQ=parts[pi].reduce((s,p)=>{
+      const pl2=parseFloat(p.length),pw2=parseFloat(p.width),pq=parseInt(p.quantity)||1;
+      return (pl2>0&&pw2>0)?s+pq:s;
+    },0);
+    const placedCount=res.placed.length;
+
+    if(totalInputQ>placedCount){
+      const panelLen=res.panel.length;
+      const usedLen=res.placed.length?Math.max(...res.placed.map(p=>p.x+p.length)):0;
+      const remaining=panelLen-usedLen;
+
+      let msg=`원자재의 용량이 부족하여 입력하신 조각 ${totalInputQ}개 중 ${placedCount}개만 배치되었습니다.\n치수나 수량을 다시 확인해주세요.`;
+      if(remaining<=0.1) msg="원자재의 잔여 길이가 0m입니다!\n더 이상 조각을 배치할 수 없습니다.";
+
+      showSizeOverModal(msg,()=>{
+        const curQ=parseInt(pt.quantity)||1;
+        const over=totalInputQ-placedCount;
+        const adjustedQ=curQ-over;
+        if(adjustedQ>=1){
+          parts[pi][ji].quantity=adjustedQ;
+        } else {
+          parts[pi][ji].length=""; parts[pi][ji].width=""; parts[pi][ji].quantity=1;
+        }
+        rebuildSec(pi); schedCalc();
+        // 이름 셀로 포커스 (조각 초기화 시) 또는 수량 셀 유지
+        setTimeout(()=>{
+          const t=document.getElementById(`ct_${pi}`);if(!t)return;
+          const rows=t.querySelectorAll(".crow");
+          if(!rows[ji])return;
+          if(adjustedQ<1){
+            const n=rows[ji].querySelector('input[data-col="name"]');if(n){n.focus();n.select();}
+          } else {
+            const qq=rows[ji].querySelector('input[data-col="quantity"]');if(qq){qq.focus();qq.select();}
+          }
+        },30);
+      });
+      return;
+    }
+  }
+
+  // ── 3. 정상 — 수량 셀로 이동 + 마지막 행이면 새 행 추가 ───────────
+  const wasLast=ji===parts[pi].length-1;
+  if(wasLast&&l>0&&w>0){
+    chkAddPart(pi,ji);
+    setTimeout(()=>{
+      const t=document.getElementById(`ct_${pi}`);if(!t)return;
+      const rows=t.querySelectorAll(".crow");
+      if(rows[ji]){const qq=rows[ji].querySelector('input[data-col="quantity"]');if(qq){qq.focus();qq.select();}}
+    },10);
+  } else {
+    moveFocusToQty(pi,ji);
+  }
+}
+
+function moveFocusToQty(pi,ji){
+  const t=document.getElementById(`ct_${pi}`);if(!t)return;
+  const rows=t.querySelectorAll(".crow");
+  if(rows[ji]){const qq=rows[ji].querySelector('input[data-col="quantity"]');if(qq){qq.focus();qq.select();}}
+}
+
+// Size Over 모달 (확인 버튼 1개, 콜백 실행)
+function showSizeOverModal(msg,onOk){
+  const mo=document.getElementById("soMo");
+  document.getElementById("soMsg").textContent=msg;
+  document.getElementById("soOk").onclick=()=>{mo.classList.remove("on");if(onOk)onOk();};
+  mo.classList.add("on");
 }
 // Enter/Tab/화살표 키: 같은 열의 다음 행으로 이동 (마지막 행이면 다음 열로)
 function cutKey(e,pi,ji,col){
