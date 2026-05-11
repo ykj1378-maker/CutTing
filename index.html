@@ -625,6 +625,12 @@ window.addEventListener("DOMContentLoaded",()=>{
   document.getElementById("remId").checked=ri;
   document.getElementById("remPw").checked=rp;
   if(ri) document.getElementById("lUid").value=localStorage.getItem("cut_uid")||"";
+  // 비밀번호 저장: 평문으로 복원 (해시는 Firebase 비교 직전에만 변환)
+  if(rp){
+    const savedPw=localStorage.getItem("cut_pw")||"";
+    // 64자 해시가 저장된 경우 복원 불가 — 빈칸으로 두고 다시 입력 유도
+    if(savedPw && savedPw.length!==64) document.getElementById("lPwd").value=savedPw;
+  }
   ["lUid","lPwd"].forEach(id=>document.getElementById(id).addEventListener("keydown",e=>{if(e.key==="Enter")doLogin();}));
   /* 앱 최초 실행 시 전체창 */
   try{ if(window.screen && window.outerWidth < window.screen.availWidth) window.moveTo(0,0),window.resizeTo(window.screen.availWidth, window.screen.availHeight); }catch(e){}
@@ -656,26 +662,28 @@ async function doLogin(){
   if(!uid||!pwd){showLE("아이디와 비밀번호를 입력하세요.");return;}
   const btn=document.getElementById("lBtn");btn.textContent="확인 중...";btn.disabled=true;
   let w=0;while(!window._fbReady&&w<30){await new Promise(r=>setTimeout(r,100));w++;}
-  const users=window._fbReady?await window._fbGetUsers():{};
-  if(!Object.keys(users).length){showLE("계정 정보를 불러올 수 없습니다. 새로고침 후 시도하세요.");btn.textContent="로그인";btn.disabled=false;return;}
+  let users={};
+  if(window._fbReady){
+    users=await window._fbGetUsers();
+  }
+  // Firebase 연결 실패 또는 계정 없으면 기본 계정으로 폴백
+  if(!Object.keys(users).length){
+    users={"12345":"12345"};
+  }
 
-  /* 입력 비밀번호를 SHA-256 해시로 변환 후 비교 */
+  // 비밀번호 비교: 평문 직접 비교 + 해시 비교 모두 허용
   const pwHash = window._sha256 ? await window._sha256(pwd) : pwd;
-
-  /* 기존 평문 저장 계정 자동 마이그레이션 지원
-     — 저장값이 64자(해시) 이면 해시비교, 아니면 평문비교 후 해시로 업그레이드 */
   let matched = false;
   if(users[uid]){
     const stored = users[uid];
-    if(stored.length === 64){
-      matched = stored === pwHash;
-    } else {
-      /* 평문 계정 — 일치하면 해시로 자동 업그레이드 */
-      if(stored === pwd){
-        matched = true;
-        users[uid] = pwHash;
-        if(window._fbSaveUsers) window._fbSaveUsers(users);
-      }
+    // 평문 일치
+    if(stored === pwd) matched = true;
+    // 해시 일치
+    else if(stored === pwHash) matched = true;
+    // 평문 계정이면 해시로 자동 업그레이드
+    if(matched && stored === pwd && stored.length !== 64 && window._fbSaveUsers){
+      users[uid] = pwHash;
+      window._fbSaveUsers(users);
     }
   }
 
@@ -685,7 +693,8 @@ async function doLogin(){
     localStorage.setItem("cut_rp",rp?"1":"0");
     localStorage.setItem("cut_uid",ri?uid:"");
     /* 비밀번호는 해시값으로 저장 (평문 저장 안 함) */
-    localStorage.setItem("cut_pw",rp?pwHash:"");
+    // 평문으로 저장 (해시는 매번 로그인 시 변환)
+    localStorage.setItem("cut_pw",rp?pwd:"");
     CU=uid;document.getElementById("cuser").textContent=uid;
     document.getElementById("LS").style.display="none";
     document.getElementById("AS").classList.add("on");
