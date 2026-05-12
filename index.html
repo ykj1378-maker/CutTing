@@ -340,8 +340,8 @@ body{font-family:var(--font);background:var(--bg);color:var(--tx);height:100vh;o
 <div id="MB">
   <div class="mi" onclick="toggleMenu(this,event)">파일<div class="md">
     <div class="mdi" onclick="menuAction(fbSave,event)">☁️ 저장</div>
-    <div class="mdi" onclick="menuAction(()=>{const a=document.createElement('a');const d=getPD();const b=new Blob([JSON.stringify(d,null,2)],{type:'application/json'});a.href=URL.createObjectURL(b);a.download=(d.site_name||'cutting_s')+'_'+tod()+'.json';a.click();toast('💾 파일 다운로드 완료');},event)">💾 파일다운로드</div>
-    <div class="mdi" onclick="menuAction(fbLoad,event)">📂 열기</div>
+    <div class="mdi" onclick="menuAction(localSave,event)">💾 파일다운로드</div>
+    <div class="mdi" onclick="menuAction(localLoad,event)">📂 열기</div>
     <div class="mdi" onclick="menuAction(fbBackups,event)">🕓 백업목록</div>
   </div></div>
   <div class="mi" onclick="toggleMenu(this,event)">보기<div class="md">
