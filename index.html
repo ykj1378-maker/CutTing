@@ -699,10 +699,27 @@ function fd(mm){
 function partLabel(panelName, partName){
   const pn=(panelName||"").trim();
   const pt=(partName||"").trim();
-  if(pn&&pt) return pn+"-("+pt+")";
+  if(pn&&pt) return pn+"("+pt+")";  // - 삭제
   if(pt) return pt;
   if(pn) return pn;
   return "";
+}
+// 여백에 따라 한 줄 또는 두 줄 반환
+// returns {single, twoLine, line1, line2}
+function partLabelLines(panelName, partName, boxW, boxH, fs){
+  const pn=(panelName||"").trim();
+  const pt=(partName||"").trim();
+  if(!pn&&!pt) return {single:"",twoLine:false,line1:"",line2:""};
+  if(!pn) return {single:pt,twoLine:false,line1:pt,line2:""};
+  if(!pt) return {single:pn,twoLine:false,line1:pn,line2:""};
+  const single=pn+"("+pt+")";
+  // 한 줄 폭 추정 (폰트 크기 × 문자 수 × 0.65)
+  const singleW=fs*single.length*0.65;
+  if(singleW<=boxW*0.88){
+    return {single,twoLine:false,line1:single,line2:""};
+  }
+  // 두 줄: 원자재이름 위, (조각이름) 아래
+  return {single:"",twoLine:true,line1:pn,line2:"("+pt+")"};
 }
 function fdPanel(mm){
   const v=parseFloat(mm)||0;
@@ -1661,16 +1678,32 @@ function drawCV(){
       const tc=cc(p.color);
       const fs=Math.max(7,Math.min(15,Math.floor(Math.min(bw/5,bh/2.5))));
       const fsS=Math.max(6,fs-2);
-      // 이름 — 중앙 (x2 버그 수정: x1+bw 사용, partLabel 적용)
-      const cvLabel=partLabel(panel.name,p.name);
-      if(cvLabel){
-        const dispFS=Math.max(7,Math.min(fs,Math.floor(Math.min(bw/(cvLabel.length*0.6+1),bh/2.5))));
-        const nw=dispFS*cvLabel.length*0.55+2,nh=dispFS;
-        const nx=Math.max(x1+nw/2+1,Math.min(x1+bw-nw/2-1,(x1+x1+bw)/2));
-        const ny=Math.max(y1+nh+1,Math.min(y1+bh-2,(y1+y1+bh)/2+dispFS*.35));
-        ctx.fillStyle=tc;ctx.font="bold "+dispFS+"px 맑은 고딕";ctx.textAlign="center";
-        ctx.fillText(cvLabel,nx,ny);
-        cvUsed.push([nx,ny-nh*0.5,nw,nh]);
+      // 이름 — 여백 따라 한줄/두줄 자동 선택
+      {
+        const cvFS=Math.max(7,Math.min(fs,Math.floor(Math.min(bw/5,bh/2.5))));
+        const {twoLine,line1,line2}=partLabelLines(panel.name,p.name,bw,bh,cvFS);
+        const cx_=(x1+x1+bw)/2;
+        if(twoLine&&line1&&line2&&bh>cvFS*2.8){
+          // 두 줄: 원자재이름 위, (조각이름) 아래
+          const fs1=Math.max(7,Math.min(cvFS,Math.floor(bw/(line1.length*0.65+1))));
+          const fs2=Math.max(6,Math.min(cvFS-1,Math.floor(bw/(line2.length*0.65+1))));
+          const cy_=(y1+y1+bh)/2;
+          const ny1=Math.max(y1+fs1+1,Math.min(cy_,cy_-fs2*0.6));
+          const ny2=Math.max(ny1+fs1*0.5,Math.min(y1+bh-2,cy_+fs2*0.8));
+          ctx.fillStyle=tc;ctx.textAlign="center";
+          ctx.font="bold "+fs1+"px 맑은 고딕";ctx.fillText(line1,cx_,ny1);
+          ctx.font="bold "+fs2+"px 맑은 고딕";ctx.fillText(line2,cx_,ny2);
+          cvUsed.push([cx_,(ny1+ny2)/2,Math.max(fs1*line1.length*0.55,fs2*line2.length*0.55)+2,(ny2-ny1+fs2)]);
+        } else if(line1){
+          const single=line1; // twoLine=false이면 line1=single
+          const dispFS=Math.max(7,Math.min(cvFS,Math.floor(Math.min(bw/(single.length*0.6+1),bh/2.5))));
+          const nw=dispFS*single.length*0.55+2,nh=dispFS;
+          const nx=Math.max(x1+nw/2+1,Math.min(x1+bw-nw/2-1,cx_));
+          const ny=Math.max(y1+nh+1,Math.min(y1+bh-2,(y1+y1+bh)/2+dispFS*.35));
+          ctx.fillStyle=tc;ctx.font="bold "+dispFS+"px 맑은 고딕";ctx.textAlign="center";
+          ctx.fillText(single,nx,ny);
+          cvUsed.push([nx,ny-nh*0.5,nw,nh]);
+        }
       }
       // 길이 치수 — 내부, 겹침 회피
       if(bw>28&&bh>20){
@@ -1841,12 +1874,19 @@ function drawFull(){
       fctx.strokeStyle=p.color;fctx.lineWidth=1.8;fctx.strokeRect(x1,y1,bw,bh);
       if(bw>20&&bh>14){
         const fs=Math.max(7,Math.min(15,Math.floor(Math.min(bw/5,bh/3))));
-        const flLabel=partLabel(panel.name,p.name);
         fctx.fillStyle=p.color;fctx.textAlign="center";
-        if(flLabel){
-          const dispFS=Math.max(7,Math.min(fs,Math.floor(Math.min(bw/(flLabel.length*0.6+1),bh/3))));
-          fctx.font=`bold ${dispFS}px 맑은 고딕`;
-          fctx.fillText(flLabel,x1+bw/2,y1+bh/2+dispFS*.35);
+        {
+          const flFS=Math.max(7,Math.min(fs,Math.floor(Math.min(bw/5,bh/3))));
+          const {twoLine:flTL,line1:flL1,line2:flL2}=partLabelLines(panel.name,p.name,bw,bh,flFS);
+          if(flTL&&flL1&&flL2&&bh>flFS*2.8){
+            const ffs1=Math.max(7,Math.min(flFS,Math.floor(bw/(flL1.length*0.65+1))));
+            const ffs2=Math.max(6,Math.min(flFS-1,Math.floor(bw/(flL2.length*0.65+1))));
+            fctx.font=`bold ${ffs1}px 맑은 고딕`;fctx.fillText(flL1,x1+bw/2,y1+bh/2-ffs2*0.3);
+            fctx.font=`bold ${ffs2}px 맑은 고딕`;fctx.fillText(flL2,x1+bw/2,y1+bh/2+ffs1*0.8);
+          } else if(flL1){
+            const dispFS=Math.max(7,Math.min(flFS,Math.floor(Math.min(bw/(flL1.length*0.6+1),bh/3))));
+            fctx.font=`bold ${dispFS}px 맑은 고딕`;fctx.fillText(flL1,x1+bw/2,y1+bh/2+dispFS*.35);
+          }
         }
         if(bh>32){fctx.font=Math.max(6,fs-2)+"px 'Courier New'";fctx.fillText(Math.round(p.length)+"×"+Math.round(p.width),x1+bw/2,y1+bh/2-fs*.8);}
       }
@@ -1877,15 +1917,30 @@ function drawFull(){
           const[cx,cy]=best||[(lx1+lx2)/2,(ly1+ly2)/2];
           return[Math.max(minX,Math.min(maxX,cx)),Math.max(minY,Math.min(maxY,cy)),hw,hh];
         }
-        // 이름
-        if(fullLabel){
-          const dispFS=Math.max(7,Math.min(fs,Math.floor(Math.min(bw/(fullLabel.length*0.6+1),bh/2.5))));
-          const nw=dispFS*fullLabel.length*0.55+2,nh=dispFS;
-          const nx=Math.max(x1+nw/2+1,Math.min(x1+bw-nw/2-1,(x1+x1+bw)/2));
-          const ny=Math.max(y1+nh+1,Math.min(y1+bh-2,(y1+y1+bh)/2+dispFS*.35));
-          fctx.fillStyle=tc;fctx.font="bold "+dispFS+"px 맑은 고딕";fctx.textAlign="center";
-          fctx.fillText(fullLabel,nx,ny);
-          fUsed.push([nx,ny-nh*0.5,nw,nh]);
+        // 이름 — 여백 따라 한줄/두줄
+        {
+          const fFS=Math.max(7,Math.min(fs,Math.floor(Math.min(bw/5,bh/2.5))));
+          const {twoLine:fTL,line1:fL1,line2:fL2}=partLabelLines(panel.name,p.name,bw,bh,fFS);
+          const fcx_=(x1+x1+bw)/2;
+          if(fTL&&fL1&&fL2&&bh>fFS*2.8){
+            const ffs1=Math.max(7,Math.min(fFS,Math.floor(bw/(fL1.length*0.65+1))));
+            const ffs2=Math.max(6,Math.min(fFS-1,Math.floor(bw/(fL2.length*0.65+1))));
+            const fcy_=(y1+y1+bh)/2;
+            const fny1=Math.max(y1+ffs1+1,Math.min(fcy_,fcy_-ffs2*0.6));
+            const fny2=Math.max(fny1+ffs1*0.5,Math.min(y1+bh-2,fcy_+ffs2*0.8));
+            fctx.fillStyle=tc;fctx.textAlign="center";
+            fctx.font="bold "+ffs1+"px 맑은 고딕";fctx.fillText(fL1,fcx_,fny1);
+            fctx.font="bold "+ffs2+"px 맑은 고딕";fctx.fillText(fL2,fcx_,fny2);
+            fUsed.push([fcx_,(fny1+fny2)/2,Math.max(ffs1*fL1.length*0.55,ffs2*fL2.length*0.55)+2,(fny2-fny1+ffs2)]);
+          } else if(fL1){
+            const dispFS=Math.max(7,Math.min(fFS,Math.floor(Math.min(bw/(fL1.length*0.6+1),bh/2.5))));
+            const nw=dispFS*fL1.length*0.55+2,nh=dispFS;
+            const nx=Math.max(x1+nw/2+1,Math.min(x1+bw-nw/2-1,fcx_));
+            const ny=Math.max(y1+nh+1,Math.min(y1+bh-2,(y1+y1+bh)/2+dispFS*.35));
+            fctx.fillStyle=tc;fctx.font="bold "+dispFS+"px 맑은 고딕";fctx.textAlign="center";
+            fctx.fillText(fL1,nx,ny);
+            fUsed.push([nx,ny-nh*0.5,nw,nh]);
+          }
         }
         if(bh>30){const[cx,cy,hw,hh]=fFindPos(x1,y1,x1+bw,y1+bh,true,fsS);fctx.font=fsS+"px 'Courier New'";fctx.fillStyle=tc;fctx.textAlign="center";fctx.fillText(Math.round(p.length),cx,cy+fsS*0.35);fUsed.push([cx,cy,hw,hh]);}
         if(bw>50){const[cx,cy,hw,hh]=fFindPos(x1,y1,x1+bw,y1+bh,false,fsS);fctx.font=fsS+"px 'Courier New'";fctx.fillStyle=tc;fctx.textAlign="center";fctx.fillText(Math.round(p.width),cx,cy+fsS*0.35);fUsed.push([cx,cy,hw,hh]);}
@@ -2322,16 +2377,29 @@ function lmDraw(){
     ctx.strokeStyle=partLc;ctx.lineWidth=isFocus?partLW2*2:partLW2;
     ctx.setLineDash([]);ctx.strokeRect(bx1,by1,bw,bh);
 
-    // 이름 — partLabel 형식: "원자재이름-(조각이름)"
-    const lmLabel=partLabel(panel.name,p.name);
-    if(bw>24&&bh>14&&lmLabel){
-      const fsN=Math.max(7,Math.min(lmNameFSv,Math.floor(Math.min(bw/(lmLabel.length*0.6+1),bh/2.5))));
-      const nameW=fsN*lmLabel.length*0.55+2,nameH=fsN;
-      const nx=Math.max(bx1+nameW/2+2,Math.min(bx2-nameW/2-2,(bx1+bx2)/2));
-      const ny=Math.max(by1+nameH+2,Math.min(by2-2,(by1+by2)/2+fsN*0.35));
-      ctx.fillStyle=partLc;ctx.textAlign="center";ctx.font=`bold ${fsN}px 맑은 고딕`;
-      ctx.fillText(lmLabel,nx,ny);
-      usedDimRects.push([nx,ny-fsN*0.5,nameW,nameH]);
+    // 이름 — 여백 따라 한줄/두줄 자동 선택
+    if(bw>24&&bh>14){
+      const lmFS=Math.max(7,Math.min(lmNameFSv,Math.floor(Math.min(bw/5,bh/2.5))));
+      const {twoLine:lmTL,line1:lmL1,line2:lmL2}=partLabelLines(panel.name,p.name,bw,bh,lmFS);
+      const lmCx=(bx1+bx2)/2,lmCy=(by1+by2)/2;
+      ctx.fillStyle=partLc;ctx.textAlign="center";
+      if(lmTL&&lmL1&&lmL2&&bh>lmFS*2.8){
+        const lmfs1=Math.max(7,Math.min(lmFS,Math.floor(bw/(lmL1.length*0.65+1))));
+        const lmfs2=Math.max(6,Math.min(lmFS-1,Math.floor(bw/(lmL2.length*0.65+1))));
+        const lmny1=Math.max(by1+lmfs1+2,Math.min(lmCy,lmCy-lmfs2*0.6));
+        const lmny2=Math.max(lmny1+lmfs1*0.5,Math.min(by2-2,lmCy+lmfs2*0.8));
+        ctx.font=`bold ${lmfs1}px 맑은 고딕`;ctx.fillText(lmL1,lmCx,lmny1);
+        ctx.font=`bold ${lmfs2}px 맑은 고딕`;ctx.fillText(lmL2,lmCx,lmny2);
+        const lmNW=Math.max(lmfs1*lmL1.length*0.55,lmfs2*lmL2.length*0.55)+2;
+        usedDimRects.push([lmCx,(lmny1+lmny2)/2,lmNW,(lmny2-lmny1+lmfs2)]);
+      } else if(lmL1){
+        const fsN=Math.max(7,Math.min(lmFS,Math.floor(Math.min(bw/(lmL1.length*0.6+1),bh/2.5))));
+        const nameW=fsN*lmL1.length*0.55+2,nameH=fsN;
+        const nx=Math.max(bx1+nameW/2+2,Math.min(bx2-nameW/2-2,lmCx));
+        const ny=Math.max(by1+nameH+2,Math.min(by2-2,lmCy+fsN*0.35));
+        ctx.font=`bold ${fsN}px 맑은 고딕`;ctx.fillText(lmL1,nx,ny);
+        usedDimRects.push([nx,ny-nameH*0.5,nameW,nameH]);
+      }
     }
 
     // 길이 치수 — 조각 내부, 겹침 자동 회피
