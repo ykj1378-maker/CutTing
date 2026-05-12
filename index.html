@@ -23,7 +23,6 @@ async function _sha256(str){
   return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,"0")).join("");
 }
 window._sha256=_sha256;
-
 </script>
 
 <script type="module">
@@ -60,16 +59,6 @@ window._fbLoad=async()=>{try{const s=await getDoc(doc(db,CO,"latest"));if(s.exis
 window._fbListBackups=async()=>{try{const q=query(collection(db,CO),orderBy("savedAt","desc"),limit(10));const s=await getDocs(q);return s.docs.filter(d=>d.id!=="latest").map(d=>({id:d.id,savedAt:d.data().savedAt,savedBy:d.data().savedBy}));}catch{return[];}};
 window._fbLoadBackup=async id=>{try{const s=await getDoc(doc(db,CO,id));if(s.exists())return{ok:true,data:JSON.parse(s.data().payload)};return{ok:false};}catch{return{ok:false};}};
 window._fbReady=true;
-
-/* === GitHub 토큰 저장/불러오기 (Firebase) === */
-window._fbSaveGistToken=async(token)=>{
-  try{await setDoc(doc(db,UC,"gist_token"),{token:encryptedToken,savedAt:new Date().toISOString()});return true;}
-  catch(e){console.error("fbSaveGistToken:",e);return false;}
-};
-window._fbLoadGistToken=async()=>{
-  try{const s=await getDoc(doc(db,UC,"gist_token"));if(s.exists())return s.data().token;return null;}
-  catch(e){return null;}
-};
 </script>
 <style>
 /* === PC앱 색상 변수 === */
@@ -2571,59 +2560,26 @@ async function delUser(uid){
 }
 
 /* === GitHub Gists === */
-async function openGists(){
+function openGists(){
   document.getElementById("gistsMo").classList.add("on");
   document.getElementById("gistUserId").value=localStorage.getItem("gist_uid")||"";
+  document.getElementById("gistToken").value=localStorage.getItem("gist_token")||"";
   document.getElementById("gistId").value=localStorage.getItem("gist_id")||"";
   document.getElementById("gistStatus").textContent="";
-  /* 토큰은 Firebase에서 복호화해서 표시 */
-  const token=await _getGistToken();
-  document.getElementById("gistToken").value=token?"●●●●●●●●●●●● (저장됨)":"";
 }
-async function saveGistSettings(){
+function saveGistSettings(){
   const uid=document.getElementById("gistUserId").value.trim();
-  const rawToken=document.getElementById("gistToken").value.trim();
+  const token=document.getElementById("gistToken").value.trim();
   const gid=document.getElementById("gistId").value.trim();
-  if(!uid||!rawToken){toast("아이디와 토큰을 입력하세요");return;}
-  const st=document.getElementById("gistStatus");
+  if(!uid||!token){toast("아이디와 토큰을 입력하세요");return;}
   localStorage.setItem("gist_uid",uid);
+  localStorage.setItem("gist_token",token);
   localStorage.setItem("gist_id",gid);
-  /* 마스킹 문자열이면 기존 토큰 유지 */
-  if(rawToken.startsWith("●")){
-    st.textContent="✅ 설정 저장됨 (토큰 기존 유지)";
-    toast("✅ 설정 저장됨");
-    return;
-  }
-  /* 새 토큰 → Firebase에 직접 저장 + 세션 캐시 */
-  localStorage.removeItem("gist_token");
-  if(!window._fbReady){toast("Firebase 연결 중...");return;}
-  st.textContent="💾 토큰 저장 중...";
-  const ok=await window._fbSaveGistToken(rawToken);
-  if(ok){
-    window._gistTokenCache=rawToken;
-    st.textContent="✅ 토큰이 저장되었습니다.";
-    toast("✅ GitHub Gists 설정 저장됨");
-  } else {
-    st.textContent="❌ Firebase 저장 실패";
-    toast("❌ 저장 실패");
-  }
+  document.getElementById("gistStatus").textContent="✅ 설정이 저장되었습니다.";
+  toast("✅ GitHub Gists 설정 저장됨");
 }
-async function _getGistToken(){
-  /* 1순위: 세션 캐시 */
-  if(window._gistTokenCache)return window._gistTokenCache;
-  /* 2순위: Firebase에서 직접 불러오기 */
-  if(window._fbReady){
-    try{
-      const token=await window._fbLoadGistToken();
-      if(token){window._gistTokenCache=token;return token;}
-    }catch(e){}
-  }
-  /* 3순위: 구버전 로컬스토리지 */
-  return localStorage.getItem("gist_token")||"";
-}
-
 async function gistSave(){
-  const token=await _getGistToken();
+  const token=localStorage.getItem("gist_token")||"";
   const gid=localStorage.getItem("gist_id")||"";
   if(!token){toast("먼저 토큰을 설정하세요");return;}
   const st=document.getElementById("gistStatus");
@@ -2644,7 +2600,7 @@ async function gistSave(){
   }catch(e){st.textContent="❌ 저장 실패: "+e.message;toast("❌ Gist 저장 실패");}
 }
 async function gistLoad(){
-  const token=await _getGistToken();
+  const token=localStorage.getItem("gist_token")||"";
   const gid=localStorage.getItem("gist_id")||"";
   const st=document.getElementById("gistStatus");
   if(!token||!gid){toast("토큰과 Gist ID를 설정하세요");return;}
@@ -2685,43 +2641,10 @@ function loadPD(data){
   schedCalc();
 }
 async function fbSave(){
-  if(!window._fbReady){toast("Firebase 연결 중...");return;}
-  toast("☁️ 저장 중...");
-  const data=getPD();data._savedBy=CU;
-
-  /* Firebase 저장 */
-  const res=await window._fbSave(data);
-
-  /* Gist 동시 저장 (토큰 있을 때만) */
-  const gistToken=await _getGistToken();
-  const gid=localStorage.getItem("gist_id")||"";
-  let gistOk=false;
-  if(gistToken){
-    try{
-      const content=JSON.stringify(data,null,2);
-      const site=data.site_name||"cutting_s";
-      const filename=`${site}_data.json`;
-      let url="https://api.github.com/gists",method="POST";
-      const body={description:`cutting_s 재단 데이터 (${new Date().toLocaleString("ko-KR")})`,public:false,files:{[filename]:{content}}};
-      if(gid){url=`https://api.github.com/gists/${gid}`;method="PATCH";}
-      const gr=await fetch(url,{method,headers:{"Authorization":`token ${gistToken}`,"Content-Type":"application/json"},body:JSON.stringify(body)});
-      if(gr.ok){
-        const gd=await gr.json();
-        if(!gid){localStorage.setItem("gist_id",gd.id);}
-        gistOk=true;
-      }
-    }catch(e){}
-  }
-
-  if(res.ok){
-    const t=new Date(res.savedAt).toLocaleString("ko-KR");
-    if(gistToken)
-      toast(gistOk?"☁️ Firebase + Gist 저장 완료 ("+t+")":"☁️ Firebase 저장 완료 (Gist 실패) "+t);
-    else
-      toast("☁️ Firebase 저장 완료 ("+t+")");
-  } else {
-    toast("❌ 저장 실패: "+(res.error||""));
-  }
+  if(!window._fbReady){toast("Firebase 연결 중...");return;}toast("☁️ 저장 중...");
+  const data=getPD();data._savedBy=CU;const res=await window._fbSave(data);
+  if(res.ok)toast("☁️ 저장 완료 ("+new Date(res.savedAt).toLocaleString("ko-KR")+")");
+  else toast("❌ 저장 실패: "+(res.error||""));
 }
 async function fbLoad(){
   if(!window._fbReady){toast("Firebase 연결 중...");return;}
