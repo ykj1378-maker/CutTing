@@ -494,6 +494,12 @@ body{font-family:var(--font);background:var(--bg);color:var(--tx);height:100vh;o
   <div style="height:38px;background:var(--fr);border-bottom:1px solid var(--ln);border-radius:10px 10px 0 0;display:flex;align-items:center;gap:5px;padding:0 9px;flex-shrink:0">
     <span style="font-size:12px;font-weight:700;color:var(--hd)">전체 보기</span>
     <div class="ftabs" id="fullTabs" style="margin-left:7px"></div>
+    <button id="fBtnTurn"  onclick="doTurnF()"    title="Turn" style="height:27px;padding:0 9px;font-size:11px;font-weight:700;border:1px solid var(--ln);border-radius:5px;background:var(--cv);color:var(--tx);cursor:pointer;font-family:var(--font);flex-shrink:0">Turn</button>
+    <div style="display:flex;border:1px solid var(--ln);border-radius:5px;overflow:hidden;flex-shrink:0;height:27px">
+      <button id="fBtnFlipX" onclick="doFlipF('x')" title="Flip X" style="width:36px;font-size:10px;font-weight:700;border:none;background:var(--cv);color:var(--tx);cursor:pointer;font-family:var(--font)">⇔X</button>
+      <div style="width:1px;background:var(--ln)"></div>
+      <button id="fBtnFlipY" onclick="doFlipF('y')" title="Flip Y" style="width:36px;font-size:10px;font-weight:700;border:none;background:var(--cv);color:var(--tx);cursor:pointer;font-family:var(--font)">⇕Y</button>
+    </div>
     <button class="zvbtn" onclick="fzoom(1.2)">+</button>
     <button class="zvbtn" onclick="fzoom(0.8)">−</button>
     <button class="zvbtn" onclick="fresetZoom()">⟳</button>
@@ -514,9 +520,11 @@ body{font-family:var(--font);background:var(--bg);color:var(--tx);height:100vh;o
   <!-- 제어판 패널 (드래그 이동 가능) -->
   <div id="lmCtrl" style="position:absolute;right:10px;top:40px;width:268px;background:#16181E;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,.6);z-index:10;overflow:hidden;cursor:default">
     <!-- 드래그 핸들 -->
-    <div id="lmCtrlHandle" style="height:22px;background:#1E2128;border-bottom:1px solid #2A2D36;display:flex;align-items:center;padding:0 8px;cursor:grab;user-select:none">
-      <span style="font-size:9px;color:#6B7280;letter-spacing:1px">⠿ 제어판 (드래그로 이동)</span>
+    <div id="lmCtrlHandle" style="height:28px;background:#1E2128;border-bottom:1px solid #2A2D36;display:flex;align-items:center;padding:0 8px;cursor:grab;user-select:none;gap:6px">
+      <span style="font-size:9px;color:#6B7280;letter-spacing:1px;flex:1">⠿ 제어판 (드래그로 이동)</span>
+      <button onclick="lmToggleLayout(event)" id="lmLayoutBtn" title="가로/세로 전환" style="background:#252830;color:#ADB5BD;border:1px solid #2A2D36;border-radius:3px;padding:1px 6px;font-size:9px;cursor:pointer;font-family:inherit;flex-shrink:0;pointer-events:all">⇆ 가로</button>
     </div>
+    <div id="lmCtrlBody">
     <!-- 섹션1: 라인 색상 -->
     <div style="padding:8px 10px 0">
       <div style="font-size:9px;font-weight:700;color:#6B7280;margin-bottom:3px">● 라인 색상</div>
@@ -573,6 +581,16 @@ body{font-family:var(--font);background:var(--bg);color:var(--tx);height:100vh;o
         <div style="font-size:9px;color:#6B7280;padding:0 8px 6px;text-align:center">조각마다 다른 색으로 구분 표시</div>
       </div>
     </div>
+    <!-- 섹션: 회전/반전 -->
+    <div style="padding:8px 10px 0">
+      <div style="font-size:9px;font-weight:700;color:#6B7280;margin-bottom:3px">↺ 회전 / 반전</div>
+      <div style="background:#1E2128;border:1px solid #2A2D36;border-radius:5px;padding:6px 8px;display:flex;gap:4px">
+        <button id="lmBtnTurn"  onclick="lmDoTurn()"    style="flex:1;background:#252830;color:#ADB5BD;border:1px solid #2A2D36;border-radius:4px;padding:5px 4px;cursor:pointer;font-size:10px;font-weight:700;font-family:'맑은 고딕',sans-serif">Turn</button>
+        <button id="lmBtnFlipX" onclick="lmDoFlip('x')" style="flex:1;background:#252830;color:#ADB5BD;border:1px solid #2A2D36;border-radius:4px;padding:5px 4px;cursor:pointer;font-size:10px;font-weight:700;font-family:'맑은 고딕',sans-serif">⇔X</button>
+        <button id="lmBtnFlipY" onclick="lmDoFlip('y')" style="flex:1;background:#252830;color:#ADB5BD;border:1px solid #2A2D36;border-radius:4px;padding:5px 4px;cursor:pointer;font-size:10px;font-weight:700;font-family:'맑은 고딕',sans-serif">⇕Y</button>
+      </div>
+    </div>
+    </div><!-- /lmCtrlBody -->
     <!-- 하단 버튼 -->
     <div style="padding:10px">
       <button onclick="lmToggleCtrl()" style="width:100%;background:#1E2128;color:#6B7280;border:1px solid #2A2D36;border-radius:5px;padding:7px;cursor:pointer;font-size:11px;font-family:'맑은 고딕',sans-serif;margin-bottom:4px">▼  최소화</button>
@@ -1652,8 +1670,8 @@ function openFull(idx){
   fF=idx!==undefined?idx:curFilm;
   document.getElementById("fullMo").classList.add("on");
   const ft=document.getElementById("fullTabs");ft.innerHTML="";
-  results.forEach((r,i)=>{const b=document.createElement("button");b.className="ftab"+(i===fF?" on":"");b.textContent=r.panel.name||"Film"+(i+1);b.addEventListener("click",()=>{fF=i;document.querySelectorAll("#fullTabs .ftab").forEach((t,j)=>t.classList.toggle("on",j===i));drawFull();});ft.appendChild(b);});
-  setTimeout(()=>{fcv.width=fcv.offsetWidth;fcv.height=fcv.offsetHeight;fresetZoom();},60);
+  results.forEach((r,i)=>{const b=document.createElement("button");b.className="ftab"+(i===fF?" on":"");b.textContent=r.panel.name||"Film"+(i+1);b.addEventListener("click",()=>{fF=i;document.querySelectorAll("#fullTabs .ftab").forEach((t,j)=>t.classList.toggle("on",j===i));_updFullFlipBtns();drawFull();});ft.appendChild(b);});
+  setTimeout(()=>{fcv.width=fcv.offsetWidth;fcv.height=fcv.offsetHeight;_updFullFlipBtns();fresetZoom();},60);
   let fd2=null,fPinch=null;
   fcv.onmousedown=e=>{fd2={x:e.clientX,y:e.clientY};};
   fcv.onmousemove=e=>{
@@ -1794,6 +1812,79 @@ function drawFull(){
 }
 function fzoom(f){fS*=f;drawFull();}function fresetZoom(){fS=1;fX=0;fY=0;drawFull();}
 
+// ── Full 보기 Turn/Flip (fF 기준) ──────────────────────────
+function doTurnF(){
+  while(turnSt.length<=fF)turnSt.push(false);
+  turnSt[fF]=!turnSt[fF];
+  _updFullFlipBtns();
+  if(fF===curFilm)_updFlipBtns();
+  schedCalc();setTimeout(()=>drawFull(),220);
+}
+function doFlipF(axis){
+  while(flipX.length<=fF)flipX.push(false);
+  while(flipY.length<=fF)flipY.push(false);
+  if(axis==="x")flipX[fF]=!flipX[fF];
+  else           flipY[fF]=!flipY[fF];
+  _updFullFlipBtns();
+  if(fF===curFilm)_updFlipBtns();
+  schedCalc();setTimeout(()=>drawFull(),220);
+}
+function _updFullFlipBtns(){
+  const i=fF;
+  const bt=document.getElementById("fBtnTurn");
+  const bx=document.getElementById("fBtnFlipX");
+  const by=document.getElementById("fBtnFlipY");
+  if(bt){bt.style.background=(turnSt[i])?"var(--bb)":"var(--cv)";bt.style.color=(turnSt[i])?"#fff":"var(--tx)";}
+  if(bx){bx.style.background=(flipX[i])?"var(--bb)":"var(--cv)";bx.style.color=(flipX[i])?"#fff":"var(--tx)";}
+  if(by){by.style.background=(flipY[i])?"var(--bb)":"var(--cv)";by.style.color=(flipY[i])?"#fff":"var(--tx)";}
+}
+
+// ── Line Mode Turn/Flip (lmFilmIdx 기준) ───────────────────
+function lmDoTurn(){
+  const i=lmFilmIdx;
+  while(turnSt.length<=i)turnSt.push(false);
+  turnSt[i]=!turnSt[i];
+  _updLmFlipBtns();schedCalc();setTimeout(()=>lmDraw(),220);
+}
+function lmDoFlip(axis){
+  const i=lmFilmIdx;
+  while(flipX.length<=i)flipX.push(false);
+  while(flipY.length<=i)flipY.push(false);
+  if(axis==="x")flipX[i]=!flipX[i];
+  else           flipY[i]=!flipY[i];
+  _updLmFlipBtns();schedCalc();setTimeout(()=>lmDraw(),220);
+}
+function _updLmFlipBtns(){
+  const i=lmFilmIdx;
+  const bt=document.getElementById("lmBtnTurn");
+  const bx=document.getElementById("lmBtnFlipX");
+  const by=document.getElementById("lmBtnFlipY");
+  if(bt){bt.style.background=(turnSt[i])?"#1D4ED8":"#252830";bt.style.color=(turnSt[i])?"#fff":"#ADB5BD";}
+  if(bx){bx.style.background=(flipX[i])?"#1D4ED8":"#252830";bx.style.color=(flipX[i])?"#fff":"#ADB5BD";}
+  if(by){by.style.background=(flipY[i])?"#1D4ED8":"#252830";by.style.color=(flipY[i])?"#fff":"#ADB5BD";}
+}
+
+// ── Line Mode 제어판 가로/세로 토글 ────────────────────────
+let lmLayoutH=false;
+function lmToggleLayout(e){
+  if(e)e.stopPropagation(); // 드래그 핸들 이벤트 차단
+  lmLayoutH=!lmLayoutH;
+  const ctrl=document.getElementById("lmCtrl");
+  const btn=document.getElementById("lmLayoutBtn");
+  if(lmLayoutH){
+    ctrl.style.width="auto";ctrl.style.maxWidth="96vw";
+    // 내부 섹션들을 가로 flex
+    const body=document.getElementById("lmCtrlBody");
+    if(body){body.style.display="flex";body.style.flexDirection="row";body.style.flexWrap="wrap";body.style.alignItems="flex-start";}
+    if(btn)btn.textContent="⇅ 세로";
+  }else{
+    ctrl.style.width="268px";ctrl.style.maxWidth="";
+    const body=document.getElementById("lmCtrlBody");
+    if(body){body.style.display="block";body.style.flexDirection="";}
+    if(btn)btn.textContent="⇆ 가로";
+  }
+}
+
 /* === Line Mode (Python open_line_mode() 완전 동일 구현) === */
 const LM_LINE_OPTS=[
   {lb:"진녹",c:"#00C020"},{lb:"형광",c:"#00FF41"},
@@ -1868,6 +1959,7 @@ function openLineMode(){
   setTimeout(()=>{
     lmCanvas.width=lmCanvas.offsetWidth;
     lmCanvas.height=lmCanvas.offsetHeight;
+    _updLmFlipBtns();
     lmDraw();
   },60);
   // 마우스휠
