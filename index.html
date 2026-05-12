@@ -2807,6 +2807,10 @@ async function autoLoad(){
   if(panels.some(p=>p.length||p.width))return;
   const res=await window._fbLoad();if(!res.ok)return;loadPD(res.data);
   const w=res.savedAt?new Date(res.savedAt).toLocaleString("ko-KR"):"";toast("☁️ 복원"+(res.savedBy?" ("+res.savedBy+")":" ")+" "+w);
+  // 토큰 복원 후 Gist 저장 1회 실행 — 재실행 후 상태표시줄 동기화
+  if(window._gist_token){
+    setTimeout(()=>{gistSaveAuto(getPD(),true);},1500);
+  }
 }
 
 /* === 로컬 저장 === */
