@@ -23,33 +23,6 @@ async function _sha256(str){
   return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,"0")).join("");
 }
 window._sha256=_sha256;
-
-/* === AES-GCM 암호화/복호화 === */
-async function _aesKey(password){
-  const enc=new TextEncoder();
-  const km=await crypto.subtle.importKey("raw",enc.encode(password),"PBKDF2",false,["deriveKey"]);
-  return crypto.subtle.deriveKey(
-    {name:"PBKDF2",salt:enc.encode("gist-token-salt-v1"),iterations:100000,hash:"SHA-256"},
-    km,{name:"AES-GCM",length:256},false,["encrypt","decrypt"]
-  );
-}
-async function encryptToken(token,password){
-  const enc=new TextEncoder();
-  const key=await _aesKey(password);
-  const iv=crypto.getRandomValues(new Uint8Array(12));
-  const encrypted=await crypto.subtle.encrypt({name:"AES-GCM",iv},key,enc.encode(token));
-  const buf=new Uint8Array(12+encrypted.byteLength);
-  buf.set(iv,0);buf.set(new Uint8Array(encrypted),12);
-  return btoa(String.fromCharCode(...buf));
-}
-async function decryptToken(b64,password){
-  const buf=Uint8Array.from(atob(b64),c=>c.charCodeAt(0));
-  const key=await _aesKey(password);
-  const dec=await crypto.subtle.decrypt({name:"AES-GCM",iv:buf.slice(0,12)},key,buf.slice(12));
-  return new TextDecoder().decode(dec);
-}
-window.encryptToken=encryptToken;
-window.decryptToken=decryptToken;
 </script>
 
 <script type="module">
@@ -86,16 +59,6 @@ window._fbLoad=async()=>{try{const s=await getDoc(doc(db,CO,"latest"));if(s.exis
 window._fbListBackups=async()=>{try{const q=query(collection(db,CO),orderBy("savedAt","desc"),limit(10));const s=await getDocs(q);return s.docs.filter(d=>d.id!=="latest").map(d=>({id:d.id,savedAt:d.data().savedAt,savedBy:d.data().savedBy}));}catch{return[];}};
 window._fbLoadBackup=async id=>{try{const s=await getDoc(doc(db,CO,id));if(s.exists())return{ok:true,data:JSON.parse(s.data().payload)};return{ok:false};}catch{return{ok:false};}};
 window._fbReady=true;
-
-/* === GitHub 토큰 암호화 저장/불러오기 (Firebase) === */
-window._fbSaveGistToken=async(encryptedToken)=>{
-  try{await setDoc(doc(db,UC,"gist_token"),{token:encryptedToken,savedAt:new Date().toISOString()});return true;}
-  catch(e){console.error("fbSaveGistToken:",e);return false;}
-};
-window._fbLoadGistToken=async()=>{
-  try{const s=await getDoc(doc(db,UC,"gist_token"));if(s.exists())return s.data().token;return null;}
-  catch(e){return null;}
-};
 </script>
 <style>
 /* === PC앱 색상 변수 === */
@@ -2597,71 +2560,26 @@ async function delUser(uid){
 }
 
 /* === GitHub Gists === */
-async function openGists(){
+function openGists(){
   document.getElementById("gistsMo").classList.add("on");
   document.getElementById("gistUserId").value=localStorage.getItem("gist_uid")||"";
+  document.getElementById("gistToken").value=localStorage.getItem("gist_token")||"";
   document.getElementById("gistId").value=localStorage.getItem("gist_id")||"";
   document.getElementById("gistStatus").textContent="";
-  /* 토큰은 Firebase에서 복호화해서 표시 */
-  const token=await _getGistToken();
-  document.getElementById("gistToken").value=token?"●●●●●●●●●●●● (저장됨)":"";
 }
-async function saveGistSettings(){
+function saveGistSettings(){
   const uid=document.getElementById("gistUserId").value.trim();
   const token=document.getElementById("gistToken").value.trim();
   const gid=document.getElementById("gistId").value.trim();
   if(!uid||!token){toast("아이디와 토큰을 입력하세요");return;}
-  const st=document.getElementById("gistStatus");
-
-  /* uid/gid는 로컬에 저장 (민감정보 아님) */
   localStorage.setItem("gist_uid",uid);
+  localStorage.setItem("gist_token",token);
   localStorage.setItem("gist_id",gid);
-  /* 토큰은 로컬에서 제거 후 Firebase에 암호화 저장 */
-  localStorage.removeItem("gist_token");
-
-  if(!CU){toast("로그인 후 시도하세요");return;}
-  st.textContent="🔐 토큰 암호화 저장 중...";
-  try{
-    /* 로그인 비밀번호 대신 uid+고정키로 암호화 (로그인 pw는 hash만 저장되므로 평문 없음) */
-    const encKey=uid+"_cutting_s_2024";
-    const encrypted=await encryptToken(token,encKey);
-    const ok=await window._fbSaveGistToken(encrypted);
-    if(ok){
-      st.textContent="✅ 토큰이 Firebase에 암호화 저장되었습니다.";
-      toast("✅ GitHub Gists 설정 저장됨");
-      /* 세션 캐시에만 평문 보관 (새로고침 시 사라짐) */
-      window._gistTokenCache=token;
-    } else {
-      st.textContent="❌ Firebase 저장 실패 — 로컬에 임시 저장합니다.";
-      localStorage.setItem("gist_token",token);
-    }
-  }catch(e){
-    st.textContent="❌ 암호화 오류: "+e.message;
-    localStorage.setItem("gist_token",token);
-  }
+  document.getElementById("gistStatus").textContent="✅ 설정이 저장되었습니다.";
+  toast("✅ GitHub Gists 설정 저장됨");
 }
-async function _getGistToken(){
-  /* 1순위: 세션 캐시 */
-  if(window._gistTokenCache)return window._gistTokenCache;
-  /* 2순위: Firebase 복호화 */
-  const uid=localStorage.getItem("gist_uid")||"";
-  if(uid&&window._fbReady){
-    try{
-      const enc=await window._fbLoadGistToken();
-      if(enc){
-        const encKey=uid+"_cutting_s_2024";
-        const token=await decryptToken(enc,encKey);
-        window._gistTokenCache=token;
-        return token;
-      }
-    }catch(e){}
-  }
-  /* 3순위: 구버전 로컬스토리지 (마이그레이션용) */
-  return localStorage.getItem("gist_token")||"";
-}
-
 async function gistSave(){
-  const token=await _getGistToken();
+  const token=localStorage.getItem("gist_token")||"";
   const gid=localStorage.getItem("gist_id")||"";
   if(!token){toast("먼저 토큰을 설정하세요");return;}
   const st=document.getElementById("gistStatus");
@@ -2682,7 +2600,7 @@ async function gistSave(){
   }catch(e){st.textContent="❌ 저장 실패: "+e.message;toast("❌ Gist 저장 실패");}
 }
 async function gistLoad(){
-  const token=await _getGistToken();
+  const token=localStorage.getItem("gist_token")||"";
   const gid=localStorage.getItem("gist_id")||"";
   const st=document.getElementById("gistStatus");
   if(!token||!gid){toast("토큰과 Gist ID를 설정하세요");return;}
@@ -2723,43 +2641,10 @@ function loadPD(data){
   schedCalc();
 }
 async function fbSave(){
-  if(!window._fbReady){toast("Firebase 연결 중...");return;}
-  toast("☁️ 저장 중...");
-  const data=getPD();data._savedBy=CU;
-
-  /* Firebase 저장 */
-  const res=await window._fbSave(data);
-
-  /* Gist 동시 저장 (토큰 있을 때만) */
-  const gistToken=await _getGistToken();
-  const gid=localStorage.getItem("gist_id")||"";
-  let gistOk=false;
-  if(gistToken){
-    try{
-      const content=JSON.stringify(data,null,2);
-      const site=data.site_name||"cutting_s";
-      const filename=`${site}_data.json`;
-      let url="https://api.github.com/gists",method="POST";
-      const body={description:`cutting_s 재단 데이터 (${new Date().toLocaleString("ko-KR")})`,public:false,files:{[filename]:{content}}};
-      if(gid){url=`https://api.github.com/gists/${gid}`;method="PATCH";}
-      const gr=await fetch(url,{method,headers:{"Authorization":`token ${gistToken}`,"Content-Type":"application/json"},body:JSON.stringify(body)});
-      if(gr.ok){
-        const gd=await gr.json();
-        if(!gid){localStorage.setItem("gist_id",gd.id);}
-        gistOk=true;
-      }
-    }catch(e){}
-  }
-
-  if(res.ok){
-    const t=new Date(res.savedAt).toLocaleString("ko-KR");
-    if(gistToken)
-      toast(gistOk?"☁️ Firebase + Gist 저장 완료 ("+t+")":"☁️ Firebase 저장 완료 (Gist 실패) "+t);
-    else
-      toast("☁️ Firebase 저장 완료 ("+t+")");
-  } else {
-    toast("❌ 저장 실패: "+(res.error||""));
-  }
+  if(!window._fbReady){toast("Firebase 연결 중...");return;}toast("☁️ 저장 중...");
+  const data=getPD();data._savedBy=CU;const res=await window._fbSave(data);
+  if(res.ok)toast("☁️ 저장 완료 ("+new Date(res.savedAt).toLocaleString("ko-KR")+")");
+  else toast("❌ 저장 실패: "+(res.error||""));
 }
 async function fbLoad(){
   if(!window._fbReady){toast("Firebase 연결 중...");return;}
