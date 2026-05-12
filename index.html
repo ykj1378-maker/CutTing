@@ -337,6 +337,10 @@ body{font-family:var(--font);background:var(--bg);color:var(--tx);height:100vh;o
     <div class="mdi" onclick="menuAction(exportExcel,event)">📊 Excel 저장</div>
   </div></div>
   <div class="mbr">
+    <span id="saveStatus" style="font-size:11px;color:var(--hd);display:flex;gap:6px;align-items:center;">
+      <span id="fbStatus" title="Firebase">☁️ —</span>
+      <span id="gistStatus2" title="GitHub Gist">🐙 —</span>
+    </span>
     <span id="cuser"></span>
     <button class="mbbtn" onclick="doLogout()">로그아웃</button>
   </div>
@@ -1578,7 +1582,7 @@ function calcLayout(){
     renderFTabs();drawCV();updIB();
   }
 }
-function schedCalc(){clearTimeout(calcT);calcT=setTimeout(calcLayout,200);}
+function schedCalc(){clearTimeout(calcT);calcT=setTimeout(calcLayout,200);schedAutoSave();}
 
 /* === 캔버스 (PC앱 스타일 동일) === */
 const cv=document.getElementById("cv"),ctx=cv.getContext("2d");
@@ -2661,11 +2665,58 @@ function loadPD(data){
   panels.forEach((_,i)=>document.getElementById("partsSecs").appendChild(buildSec(i)));
   schedCalc();
 }
+/* === 저장 상태 표시 === */
+let _autoSaveTimer=null;
+function setFbStatus(state,time){
+  const el=document.getElementById("fbStatus");if(!el)return;
+  if(state==="saving")el.textContent="☁️ 저장 중...";
+  else if(state==="ok")el.textContent="☁️ "+time;
+  else if(state==="err")el.textContent="☁️ ❌";
+}
+function setGistStatus(state,time){
+  const el=document.getElementById("gistStatus2");if(!el)return;
+  if(state==="saving")el.textContent="🐙 저장 중...";
+  else if(state==="ok")el.textContent="🐙 "+time;
+  else if(state==="err")el.textContent="🐙 ❌";
+}
+function schedAutoSave(){
+  clearTimeout(_autoSaveTimer);
+  _autoSaveTimer=setTimeout(async()=>{
+    await autoFbSave();
+    await autoGistSave();
+  },5000);
+}
+async function autoFbSave(){
+  if(!window._fbReady)return;
+  setFbStatus("saving");
+  const data=getPD();data._savedBy=CU;
+  const res=await window._fbSave(data);
+  if(res.ok){const t=new Date(res.savedAt);setFbStatus("ok",t.getHours().toString().padStart(2,"0")+":"+t.getMinutes().toString().padStart(2,"0"));}
+  else setFbStatus("err");
+}
+async function autoGistSave(){
+  const token=window._gist_token||"";if(!token)return;
+  const gid=window._gist_id||"";
+  setGistStatus("saving");
+  try{
+    const data=getPD();const content=JSON.stringify(data,null,2);
+    const site=data.site_name||"cutting_s";const filename=`${site}_data.json`;
+    let res,url="https://api.github.com/gists",method="POST";
+    const body={description:`cutting_s 재단 데이터 (${new Date().toLocaleString("ko-KR")})`,public:false,files:{[filename]:{content}}};
+    if(gid){url=`https://api.github.com/gists/${gid}`;method="PATCH";}
+    res=await fetch(url,{method,headers:{"Authorization":`token ${token}`,"Content-Type":"application/json"},body:JSON.stringify(body)});
+    if(!res.ok)throw new Error(`HTTP ${res.status}`);
+    const d=await res.json();
+    if(!gid){window._gist_id=d.id;document.getElementById("gistId")&&(document.getElementById("gistId").value=d.id);await window._fbSaveGist(CU,window._gist_uid||"",token,d.id);}
+    const now=new Date();setGistStatus("ok",now.getHours().toString().padStart(2,"0")+":"+now.getMinutes().toString().padStart(2,"0"));
+  }catch(e){setGistStatus("err");}
+}
 async function fbSave(){
-  if(!window._fbReady){toast("Firebase 연결 중...");return;}toast("☁️ 저장 중...");
+  if(!window._fbReady){toast("Firebase 연결 중...");return;}
+  setFbStatus("saving");toast("☁️ 저장 중...");
   const data=getPD();data._savedBy=CU;const res=await window._fbSave(data);
-  if(res.ok)toast("☁️ 저장 완료 ("+new Date(res.savedAt).toLocaleString("ko-KR")+")");
-  else toast("❌ 저장 실패: "+(res.error||""));
+  if(res.ok){const t=new Date(res.savedAt);setFbStatus("ok",t.getHours().toString().padStart(2,"0")+":"+t.getMinutes().toString().padStart(2,"0"));toast("☁️ 저장 완료 ("+t.toLocaleString("ko-KR")+")");}
+  else{setFbStatus("err");toast("❌ 저장 실패: "+(res.error||""));}
 }
 async function fbLoad(){
   if(!window._fbReady){toast("Firebase 연결 중...");return;}
