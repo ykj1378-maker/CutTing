@@ -2617,6 +2617,9 @@ async function saveGistSettings(){
   const gid=document.getElementById("gistId").value.trim();
   if(!token){toast("GitHub Token을 입력해주세요.");return;}
   window._gist_token=token;window._gist_id=gid;
+  // 브라우저에 영구 저장 — 재실행해도 유지
+  localStorage.setItem("cut_gist_token",token);
+  localStorage.setItem("cut_gist_id",gid);
   document.getElementById("gistsMo").classList.remove("show");
   toast("✅ GitHub Gist 설정 저장 — 자동저장 테스트 중...");
   const db=getPD();
@@ -2745,6 +2748,7 @@ async function gistSaveAuto(db, quiet){
       if(res.ok){
         const json=await res.json();
         window._gist_id=json.id;
+        localStorage.setItem("cut_gist_id",json.id); // 새로 생성된 ID 영구 저장
         document.getElementById("gistId")&&(document.getElementById("gistId").value=json.id);
         const now=new Date();setGistStatus("ok",now.getHours().toString().padStart(2,"0")+":"+now.getMinutes().toString().padStart(2,"0"));
         if(!quiet)toast("✅ GitHub Gist 생성 완료! ID: "+json.id);
@@ -2786,6 +2790,9 @@ async function fbRestore(id){
   else toast("❌ 복원 실패");
 }
 async function autoLoad(){
+  // Gist 토큰/ID 복원 (localStorage 영구 저장값)
+  window._gist_token=localStorage.getItem("cut_gist_token")||"";
+  window._gist_id=localStorage.getItem("cut_gist_id")||"";
   if(!window._fbReady)return;if(panels.some(p=>p.length||p.width))return;
   const res=await window._fbLoad();if(!res.ok)return;loadPD(res.data);
   const w=res.savedAt?new Date(res.savedAt).toLocaleString("ko-KR"):"";toast("☁️ 복원"+(res.savedBy?" ("+res.savedBy+")":" ")+" "+w);
