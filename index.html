@@ -522,7 +522,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--tx);height:100vh;o
     <!-- 드래그 핸들 -->
     <div id="lmCtrlHandle" style="height:28px;background:#1E2128;border-bottom:1px solid #2A2D36;display:flex;align-items:center;padding:0 8px;cursor:grab;user-select:none;gap:6px">
       <span style="font-size:9px;color:#6B7280;letter-spacing:1px;flex:1">⠿ 제어판 (드래그로 이동)</span>
-      <button onclick="lmToggleLayout(event)" id="lmLayoutBtn" title="가로/세로 전환" style="background:#252830;color:#ADB5BD;border:1px solid #2A2D36;border-radius:3px;padding:1px 6px;font-size:9px;cursor:pointer;font-family:inherit;flex-shrink:0;pointer-events:all">⇆ 가로</button>
+      <button onclick="lmToggleLayout(event)" id="lmLayoutBtn" title="가로/세로 전환" style="background:#252830;color:#ADB5BD;border:1px solid #2A2D36;border-radius:3px;padding:1px 7px;font-size:9px;cursor:pointer;font-family:inherit;flex-shrink:0;pointer-events:all">⇆ 가로</button>
     </div>
     <div id="lmCtrlBody">
     <!-- 섹션1: 라인 색상 -->
@@ -581,8 +581,8 @@ body{font-family:var(--font);background:var(--bg);color:var(--tx);height:100vh;o
         <div style="font-size:9px;color:#6B7280;padding:0 8px 6px;text-align:center">조각마다 다른 색으로 구분 표시</div>
       </div>
     </div>
-    <!-- 섹션: 회전/반전 -->
-    <div style="padding:8px 10px 0">
+    <!-- 섹션6: 회전/반전 -->
+    <div class="lm-sec" style="padding:8px 10px 0">
       <div style="font-size:9px;font-weight:700;color:#6B7280;margin-bottom:3px">↺ 회전 / 반전</div>
       <div style="background:#1E2128;border:1px solid #2A2D36;border-radius:5px;padding:6px 8px;display:flex;gap:4px">
         <button id="lmBtnTurn"  onclick="lmDoTurn()"    style="flex:1;background:#252830;color:#ADB5BD;border:1px solid #2A2D36;border-radius:4px;padding:5px 4px;cursor:pointer;font-size:10px;font-weight:700;font-family:'맑은 고딕',sans-serif">Turn</button>
@@ -1812,21 +1812,18 @@ function drawFull(){
 }
 function fzoom(f){fS*=f;drawFull();}function fresetZoom(){fS=1;fX=0;fY=0;drawFull();}
 
-// ── Full 보기 Turn/Flip (fF 기준) ──────────────────────────
+// ── Full 보기 Turn/Flip ──────────────────────────────────────
 function doTurnF(){
   while(turnSt.length<=fF)turnSt.push(false);
   turnSt[fF]=!turnSt[fF];
-  _updFullFlipBtns();
-  if(fF===curFilm)_updFlipBtns();
+  _updFullFlipBtns();if(fF===curFilm)_updFlipBtns();
   schedCalc();setTimeout(()=>drawFull(),220);
 }
 function doFlipF(axis){
   while(flipX.length<=fF)flipX.push(false);
   while(flipY.length<=fF)flipY.push(false);
-  if(axis==="x")flipX[fF]=!flipX[fF];
-  else           flipY[fF]=!flipY[fF];
-  _updFullFlipBtns();
-  if(fF===curFilm)_updFlipBtns();
+  if(axis==="x")flipX[fF]=!flipX[fF];else flipY[fF]=!flipY[fF];
+  _updFullFlipBtns();if(fF===curFilm)_updFlipBtns();
   schedCalc();setTimeout(()=>drawFull(),220);
 }
 function _updFullFlipBtns(){
@@ -1839,7 +1836,7 @@ function _updFullFlipBtns(){
   if(by){by.style.background=(flipY[i])?"var(--bb)":"var(--cv)";by.style.color=(flipY[i])?"#fff":"var(--tx)";}
 }
 
-// ── Line Mode Turn/Flip (lmFilmIdx 기준) ───────────────────
+// ── Line Mode Turn/Flip ──────────────────────────────────────
 function lmDoTurn(){
   const i=lmFilmIdx;
   while(turnSt.length<=i)turnSt.push(false);
@@ -1850,8 +1847,7 @@ function lmDoFlip(axis){
   const i=lmFilmIdx;
   while(flipX.length<=i)flipX.push(false);
   while(flipY.length<=i)flipY.push(false);
-  if(axis==="x")flipX[i]=!flipX[i];
-  else           flipY[i]=!flipY[i];
+  if(axis==="x")flipX[i]=!flipX[i];else flipY[i]=!flipY[i];
   _updLmFlipBtns();schedCalc();setTimeout(()=>lmDraw(),220);
 }
 function _updLmFlipBtns(){
@@ -1864,23 +1860,28 @@ function _updLmFlipBtns(){
   if(by){by.style.background=(flipY[i])?"#1D4ED8":"#252830";by.style.color=(flipY[i])?"#fff":"#ADB5BD";}
 }
 
-// ── Line Mode 제어판 가로/세로 토글 ────────────────────────
+// ── Line Mode 제어판 가로/세로 토글 ─────────────────────────
+// PC앱과 동일: 섹션들을 2열 grid로 재배치
 let lmLayoutH=false;
 function lmToggleLayout(e){
-  if(e)e.stopPropagation(); // 드래그 핸들 이벤트 차단
+  if(e)e.stopPropagation();
   lmLayoutH=!lmLayoutH;
   const ctrl=document.getElementById("lmCtrl");
+  const body=document.getElementById("lmCtrlBody");
   const btn=document.getElementById("lmLayoutBtn");
+  if(!ctrl||!body)return;
   if(lmLayoutH){
-    ctrl.style.width="auto";ctrl.style.maxWidth="96vw";
-    // 내부 섹션들을 가로 flex
-    const body=document.getElementById("lmCtrlBody");
-    if(body){body.style.display="flex";body.style.flexDirection="row";body.style.flexWrap="wrap";body.style.alignItems="flex-start";}
+    // 가로: 섹션들을 2열 CSS grid로 재배치
+    ctrl.style.width="520px";ctrl.style.maxWidth="96vw";
+    body.style.display="grid";
+    body.style.gridTemplateColumns="1fr 1fr";
+    body.style.gap="0";
     if(btn)btn.textContent="⇅ 세로";
   }else{
+    // 세로: 원래 block 레이아웃으로 복원
     ctrl.style.width="268px";ctrl.style.maxWidth="";
-    const body=document.getElementById("lmCtrlBody");
-    if(body){body.style.display="block";body.style.flexDirection="";}
+    body.style.display="block";
+    body.style.gridTemplateColumns="";
     if(btn)btn.textContent="⇆ 가로";
   }
 }
