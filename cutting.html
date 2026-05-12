@@ -1,0 +1,2888 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta name="theme-color" content="#1B3A6B">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Cutting S">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon.png">
+<title>cutting_s</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<!-- SHA-256: 반드시 Firebase module보다 먼저 로드 -->
+<script>
+async function _sha256(str){
+  const buf=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,"0")).join("");
+}
+window._sha256=_sha256;
+</script>
+
+<script type="module">
+import{initializeApp}from"https://www.gstatic.com/firebasejs/10.12.1/firebase-app.js";
+import{getFirestore,doc,setDoc,getDoc,collection,getDocs,orderBy,query,limit}from"https://www.gstatic.com/firebasejs/10.12.1/firebase-firestore.js";
+const C={apiKey:"AIzaSyARK0Ku1EZDgzPV1F0JZKWmQ0jMDfBysqM",authDomain:"bitna-17ed3.firebaseapp.com",projectId:"bitna-17ed3",storageBucket:"bitna-17ed3.firebasestorage.app",messagingSenderId:"798709646035",appId:"1:798709646035:web:dd06dd5b66a339cd894a26"};
+const app=initializeApp(C),db=getFirestore(app),CO="cutting_projects",UC="cutting_users";
+
+/* 계정 불러오기 */
+window._fbGetUsers=async()=>{
+  try{
+    const s=await getDoc(doc(db,UC,"accounts"));
+    if(s.exists())return s.data().list||{};
+    const h=await window._sha256("12345");
+    const d={"12345":h};
+    await setDoc(doc(db,UC,"accounts"),{list:d});
+    return d;
+  }catch(e){console.error("fbGetUsers:",e);return{};}
+};
+
+/* 계정 저장 — 오류 상세 로깅 */
+window._fbSaveUsers=async u=>{
+  try{
+    await setDoc(doc(db,UC,"accounts"),{list:u});
+    return true;
+  }catch(e){
+    console.error("fbSaveUsers error:",e);
+    return false;
+  }
+};
+
+window._fbSave=async o=>{try{const p=JSON.stringify(o),t=new Date().toISOString();await setDoc(doc(db,CO,"latest"),{payload:p,savedAt:t,savedBy:o._savedBy||""});await setDoc(doc(db,CO,"bk_"+t.replace(/[:.]/g,"-")),{payload:p,savedAt:t,savedBy:o._savedBy||""});return{ok:true,savedAt:t};}catch(e){return{ok:false,error:e.message};}};
+window._fbLoad=async()=>{try{const s=await getDoc(doc(db,CO,"latest"));if(s.exists()){const d=s.data();return{ok:true,data:JSON.parse(d.payload),savedAt:d.savedAt,savedBy:d.savedBy};}return{ok:false};}catch(e){return{ok:false,error:e.message};}};
+window._fbListBackups=async()=>{try{const q=query(collection(db,CO),orderBy("savedAt","desc"),limit(10));const s=await getDocs(q);return s.docs.filter(d=>d.id!=="latest").map(d=>({id:d.id,savedAt:d.data().savedAt,savedBy:d.data().savedBy}));}catch{return[];}};
+window._fbLoadBackup=async id=>{try{const s=await getDoc(doc(db,CO,id));if(s.exists())return{ok:true,data:JSON.parse(s.data().payload)};return{ok:false};}catch{return{ok:false};}};
+window._fbSaveGist=async(loginUser,uid,token,gid)=>{
+  try{await setDoc(doc(db,UC,"gist_"+loginUser),{uid,token,gid});return true;}
+  catch(e){console.error("fbSaveGist:",e);return false;}
+};
+window._fbLoadGist=async(loginUser)=>{
+  try{const s=await getDoc(doc(db,UC,"gist_"+loginUser));if(s.exists())return s.data();return null;}
+  catch(e){return null;}
+};
+window._fbReady=true;
+</script>
+<style>
+/* === PC앱 색상 변수 === */
+:root{
+  --bg:#F8F9FA;--fr:#FFFFFF;--tx:#333;--hd:#495057;
+  --bb:#343A40;--bf:#FFF;--eb:#FFF;--ef:#495057;
+  --cv:#F1F3F5;--sc:#E03131;--ln:#CED4DA;--ac:#339AF0;
+  --font:'맑은 고딕','Apple SD Gothic Neo',sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--font);background:var(--bg);color:var(--tx);height:100vh;overflow:hidden;font-size:13px}
+
+/* === 로그인 === */
+#LS{position:fixed;inset:0;z-index:9999;background:linear-gradient(135deg,#1B3A6B,#2E5FA3);display:flex;align-items:center;justify-content:center}
+.lcard{background:var(--fr);border-radius:12px;width:350px;box-shadow:0 12px 40px rgba(27,58,107,.25);overflow:hidden}
+.ltop{background:linear-gradient(90deg,#1B3A6B,#2E5FA3);height:36px;display:flex;align-items:center;justify-content:center}
+.ltop span{color:#fff;font-size:13px;font-weight:700;letter-spacing:.5px}
+.lbody{padding:26px 22px 22px}
+.ltitle{font-size:17px;font-weight:700;color:var(--hd);text-align:center;margin-bottom:3px}
+.lsub{font-size:11px;color:#868E96;text-align:center;margin-bottom:20px}
+.lerr{display:none;background:#FFF5F5;border:1px solid #FFC9C9;border-radius:6px;padding:7px 11px;font-size:12px;color:var(--sc);margin-bottom:10px}
+.lerr.show{display:block}
+.lfld{margin-bottom:5px}
+.lfld label{display:block;font-size:11px;font-weight:600;color:var(--hd);margin-bottom:3px}
+.lfld input[type=text],.lfld input[type=password]{width:100%;background:var(--eb);border:1px solid var(--ln);border-radius:6px;padding:9px 11px;font-size:14px;color:var(--ef);outline:none;transition:border-color .15s;font-family:'Courier New',monospace}
+.lfld input:focus{border-color:var(--ac);box-shadow:0 0 0 2px rgba(51,154,240,.12)}
+.lchk{display:flex;align-items:center;gap:6px;margin-top:5px;font-size:11px;color:var(--hd);cursor:pointer;user-select:none}
+.lchk input{width:13px;height:13px;accent-color:var(--ac);cursor:pointer}
+.lbtn{width:100%;background:var(--bb);color:var(--bf);border:none;border-radius:7px;padding:11px;font-size:14px;font-weight:700;font-family:var(--font);cursor:pointer;margin-top:16px;transition:background .15s}
+.lbtn:hover{background:#495057}
+.lver{text-align:center;margin-top:12px;font-size:10px;color:#ADB5BD}
+
+/* === 앱 화면 === */
+#AS{display:none;height:100vh;flex-direction:column}
+#AS.on{display:flex}
+
+/* 메뉴바 */
+#MB{height:32px;background:var(--fr);border-bottom:1px solid var(--ln);display:flex;align-items:center;padding:0 8px;gap:1px;flex-shrink:0;user-select:none}
+.mi{position:relative;padding:3px 9px;font-size:12px;color:var(--tx);cursor:pointer;border-radius:3px}
+.mi:hover{background:var(--cv)}
+.mi.open{background:var(--cv)}
+.md{display:none;position:absolute;top:calc(100% + 2px);left:0;background:var(--fr);border:1px solid var(--ln);border-radius:6px;min-width:155px;box-shadow:0 4px 14px rgba(0,0,0,.12);z-index:500;overflow:hidden}
+.mi.open .md{display:block}
+.mdi{padding:7px 13px;font-size:12px;color:var(--tx);cursor:pointer;white-space:nowrap}
+.mdi:hover{background:var(--cv)}
+.mds{height:1px;background:var(--ln);margin:3px 0}
+.mbr{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:11px;color:var(--hd)}
+#cuser{font-weight:700}
+.mbbtn{padding:3px 9px;background:var(--cv);border:1px solid var(--ln);border-radius:4px;font-size:11px;cursor:pointer;color:var(--tx);font-family:var(--font)}
+.mbbtn:hover{background:var(--ln)}
+
+/* 본문 */
+#ML{flex:1;display:flex;overflow:hidden}
+
+/* 왼쪽 입력 */
+#LP{width:540px;min-width:280px;flex-shrink:0;background:var(--fr);border-right:1px solid var(--ln);display:flex;flex-direction:column;overflow:hidden}
+#RZ{width:5px;background:var(--ln);cursor:col-resize;flex-shrink:0;transition:background .15s}
+#RZ:hover{background:var(--ac)}
+#RP{flex:1;display:flex;flex-direction:column;background:var(--cv);overflow:hidden}
+
+/* 입력 스크롤 */
+#IS{flex:1;overflow-y:auto;padding:12px 12px 8px;overflow-x:hidden}
+#IS::-webkit-scrollbar{width:5px}
+#IS::-webkit-scrollbar-thumb{background:var(--ln);border-radius:3px}
+
+/* Name 행 */
+.nrow{display:flex;align-items:center;gap:8px;margin-bottom:11px}
+.nrow label{font-size:12px;font-weight:700;color:var(--hd);white-space:nowrap}
+.ninp{flex:1;background:var(--eb);border:1px solid var(--ln);border-radius:5px;padding:5px 9px;font-size:13px;color:var(--ef);outline:none;font-family:var(--font)}
+.ninp:focus{border-color:var(--ac)}
+
+/* 섹션 레이블 */
+.slbl{font-size:11px;font-weight:700;color:var(--hd);text-transform:uppercase;letter-spacing:.8px;margin-bottom:5px;display:flex;align-items:center;justify-content:space-between}
+.sadd{font-size:11px;font-weight:400;color:var(--ac);cursor:pointer;text-transform:none;letter-spacing:0}
+.sadd:hover{text-decoration:underline}
+
+/* 테이블 헤더 */
+.thdr{display:flex;align-items:center;gap:3px;background:var(--cv);border:1px solid var(--ln);border-radius:5px 5px 0 0;padding:4px 5px;font-size:11px;font-weight:700;color:var(--hd)}
+.thdr span{text-align:center;flex-shrink:0}
+
+/* 테이블 */
+.ptbl{margin-bottom:13px;border:1px solid var(--ln);border-top:none;border-radius:0 0 5px 5px;overflow:hidden}
+.prow,.crow{display:flex;align-items:center;gap:3px;padding:3px 5px;background:var(--fr);border-bottom:1px solid var(--ln);overflow:hidden}
+.prow:last-child,.crow:last-child{border-bottom:none}
+.prow:hover,.crow:hover{background:#F8F9FA}
+
+/* 입력 셀 */
+.ci{background:var(--eb);border:1px solid var(--ln);border-radius:4px;padding:5px 6px;font-size:13px;color:var(--ef);outline:none;font-family:var(--font);min-width:0;flex-shrink:0;transition:border-color .15s,box-shadow .15s}
+.ci:focus{border-color:var(--ac);box-shadow:0 0 0 2px rgba(51,154,240,.1)}
+.ci::placeholder{color:#ADB5BD;font-size:11px}
+
+/* NO 버튼 */
+.nobtn{background:var(--cv);border:1px solid var(--ln);border-radius:4px;font-size:11px;font-weight:700;color:var(--hd);cursor:pointer;padding:4px 0;text-align:center;flex-shrink:0;width:28px;font-family:var(--font)}
+.nobtn:hover{background:var(--ln)}
+
+/* 색상 버튼 */
+.cbtn{border-radius:4px;border:2px solid var(--ln);cursor:pointer;flex-shrink:0;transition:transform .1s}
+.cbtn:hover{transform:scale(1.12)}
+
+/* Grain 체크 */
+.gcb{accent-color:var(--ac);cursor:pointer;flex-shrink:0}
+
+/* 삭제 버튼 */
+.delbtn{background:none;border:none;color:#ADB5BD;cursor:pointer;font-size:14px;line-height:1;padding:2px 3px;flex-shrink:0}
+.delbtn:hover{color:var(--sc)}
+
+/* 조각 섹션 */
+.csec{margin-bottom:13px}
+.ctitle{display:flex;align-items:center;gap:5px;margin-bottom:4px}
+.cno{background:var(--bb);color:#fff;font-size:11px;font-weight:700;width:22px;height:22px;border-radius:4px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0}
+.cname{font-size:12px;font-weight:700;color:var(--hd);flex:1}
+.cadd{background:none;border:1px dashed var(--ln);color:var(--hd);padding:2px 9px;border-radius:4px;font-size:11px;cursor:pointer;font-family:var(--font)}
+.cadd:hover{border-color:var(--ac);color:var(--ac)}
+.ctbl{border:1px solid var(--ln);border-top:none;border-radius:0 0 5px 5px;overflow:hidden;margin-bottom:3px}
+/* 조각 행 아래 인라인 힌트/경고 메시지 */
+.crow-hint{font-size:10px;font-weight:600;padding:2px 8px 2px 10px;border-bottom:1px solid var(--ln);display:none;align-items:center;gap:4px}
+.crow-hint.warn{display:flex;background:#FFF5F5;color:#C92A2A}
+.crow-hint.info{display:flex;background:#E7F5FF;color:#1864AB}
+.crow-hint.ok{display:flex;background:#F0FFF4;color:#2B8A3E}
+/* 힌트 깜빡임 없음 */
+/* adj 조정 UI */
+.adj-cell{display:inline-flex;align-items:center;background:#F1F3F5;border:1px solid #CED4DA;border-radius:4px;overflow:hidden;height:22px;margin-left:8px}
+.adj-sign{background:none;border:none;border-right:1px solid #CED4DA;font-size:11px;font-weight:700;padding:0 6px;cursor:pointer;height:100%;color:#1971C2;font-family:var(--font)}
+.adj-sign.minus{color:#C92A2A}
+.adj-inp{width:36px;border:none;background:none;font-size:11px;text-align:center;padding:0 2px;font-family:var(--font);outline:none;color:#333}
+.adj-unit{font-size:10px;color:#868E96;padding:0 5px 0 1px}
+/* adj 드롭다운 팝업 */
+.adj-drop{position:fixed;z-index:9999;background:#fff;border:1px solid #CED4DA;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.15);min-width:90px;overflow:hidden;display:none}
+.adj-drop.on{display:block}
+.adj-drop button{display:block;width:100%;border:none;background:none;text-align:left;padding:7px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--font)}
+.adj-drop button:hover{background:#F8F9FA}
+/* adj 라벨 (행 아래) */
+.adj-label{font-size:10px;font-weight:600;padding:2px 8px;border-bottom:1px solid var(--ln);display:none}
+.adj-label.on{display:flex;align-items:center;gap:4px}
+
+/* 하단 버튼 */
+#BB{padding:9px 12px;border-top:1px solid var(--ln);display:flex;gap:7px;background:var(--fr);flex-shrink:0}
+.abtn{flex:1;padding:8px;background:var(--bb);color:var(--bf);border:none;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--font)}
+.abtn:hover{background:#495057}
+.abtn.sec{background:var(--cv);color:var(--tx);border:1px solid var(--ln)}
+.abtn.sec:hover{background:var(--ln)}
+
+/* 오른쪽 캔버스 */
+#CT{height:38px;background:var(--fr);border-bottom:1px solid var(--ln);display:flex;align-items:center;gap:5px;padding:0 9px;flex-shrink:0}
+.ftabs{display:flex;gap:4px;overflow-x:auto;flex:1;scrollbar-width:none}
+.ftabs::-webkit-scrollbar{display:none}
+.ftab{background:var(--cv);border:1px solid var(--ln);color:var(--hd);padding:4px 9px;border-radius:5px;font-size:11px;cursor:pointer;white-space:nowrap;font-family:var(--font)}
+.ftab.on{background:var(--bb);border-color:var(--bb);color:#fff}
+.zvbtn{background:var(--cv);border:1px solid var(--ln);width:27px;height:27px;border-radius:5px;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--tx);flex-shrink:0}
+.zvbtn:hover{background:var(--ln)}
+#CW{flex:1;position:relative;overflow:hidden}
+#cv{display:block;width:100%;height:100%;cursor:grab}
+#cv:active{cursor:grabbing}
+#IB{height:34px;background:var(--fr);border-top:1px solid var(--ln);display:flex;align-items:center;overflow-x:auto;flex-shrink:0}
+#IB::-webkit-scrollbar{height:3px}
+#IB::-webkit-scrollbar-thumb{background:var(--ln)}
+.ibox{display:flex;align-items:center;padding:0 13px;border-right:1px solid var(--ln);height:100%;white-space:nowrap;gap:8px}
+.ibn{font-size:11px;font-weight:700;color:var(--hd)}
+.ibv{font-size:11px;color:var(--tx)}
+
+/* 모달 */
+.mo{display:none;position:fixed;inset:0;z-index:800;background:rgba(0,0,0,.42);align-items:center;justify-content:center}
+.mo.on{display:flex}
+.mc{background:var(--fr);border-radius:10px;border:1px solid var(--ln);box-shadow:0 8px 28px rgba(0,0,0,.14);width:90%;max-width:400px;max-height:85vh;overflow-y:auto;padding:20px;animation:mpop .2s ease}
+@keyframes mpop{from{opacity:0;transform:scale(.96)}to{opacity:1;transform:scale(1)}}
+.mct{font-size:14px;font-weight:700;color:var(--hd);margin-bottom:14px;display:flex;align-items:center;gap:7px}
+.mcl{margin-left:auto;background:none;border:none;font-size:18px;cursor:pointer;color:#ADB5BD;line-height:1}
+.mcl:hover{color:var(--sc)}
+.mf{margin-bottom:11px}
+.mf label{display:block;font-size:11px;font-weight:700;color:var(--hd);margin-bottom:3px}
+.mf input{width:100%;background:var(--eb);border:1px solid var(--ln);border-radius:5px;padding:7px 10px;font-size:13px;color:var(--ef);outline:none;font-family:'Courier New',monospace}
+.mf input:focus{border-color:var(--ac)}
+.mbs{display:flex;gap:7px;margin-top:14px;justify-content:flex-end}
+.mb_{padding:7px 16px;border-radius:5px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--font)}
+.mb_.p{background:var(--bb);color:#fff;border:none}.mb_.p:hover{background:#495057}
+.mb_.s{background:var(--cv);color:var(--tx);border:1px solid var(--ln)}.mb_.s:hover{background:var(--ln)}
+.ui{display:flex;align-items:center;gap:7px;padding:8px 11px;background:var(--fr);border:1px solid var(--ln);border-radius:5px;margin-bottom:5px}
+.uid{font-size:13px;font-weight:700;flex:1;color:var(--hd)}
+.upw{font-size:11px;color:#ADB5BD;min-width:60px;letter-spacing:2px}
+.udel{background:none;border:1px solid var(--ln);border-radius:4px;color:#ADB5BD;cursor:pointer;font-size:12px;padding:2px 7px;transition:all .15s}
+.udel:hover{color:var(--sc);border-color:var(--sc);background:#FFF5F5}
+.bki{display:flex;align-items:center;gap:7px;padding:7px 9px;background:var(--cv);border:1px solid var(--ln);border-radius:5px;margin-bottom:5px;cursor:pointer}
+.bki:hover{border-color:var(--ac)}
+.bkw{font-size:11px;flex:1;color:var(--tx)}
+.bkb{font-size:10px;color:#868E96}
+.cgrid{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;margin-bottom:11px}
+.cdot{width:100%;aspect-ratio:1;border-radius:6px;cursor:pointer;border:2px solid transparent;transition:transform .1s}
+.cdot:hover{transform:scale(1.1)}
+.cdot.sel{border-color:#333}
+#fullCv{flex:1;display:block;width:100%;cursor:grab;background:var(--cv)}
+#fullCv:active{cursor:grabbing}
+
+/* 통계 카드 */
+.sg{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px}
+.sc{background:var(--cv);border:1px solid var(--ln);border-radius:5px;padding:9px}
+.sc .sl{font-size:10px;color:var(--hd);margin-bottom:2px}
+.sc .sv{font-size:16px;font-weight:700}
+.sv.a{color:var(--ac)}.sv.d{color:var(--sc)}
+
+/* 토스트 */
+#toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%) translateY(60px);background:#343A40;color:#fff;padding:8px 16px;border-radius:20px;font-size:12px;z-index:9999;transition:transform .25s;white-space:nowrap;pointer-events:none}
+#toast.show{transform:translateX(-50%) translateY(0)}
+
+/* === 업무일지형 모달 (GitHub Gist 설정) === */
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(15,27,55,.45);z-index:900;align-items:center;justify-content:center}
+.modal-overlay.show{display:flex}
+.modal-gist{background:#fff;border-radius:16px;width:460px;max-width:94vw;max-height:92vh;display:flex;flex-direction:column;box-shadow:0 24px 72px rgba(0,0,0,.3);overflow:hidden}
+.modal-head-g{background:#1B3A6B;color:#fff;padding:13px 18px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.modal-head-g h3{font-size:14px;font-weight:700;margin:0}
+.modal-head-btns-g{display:flex;gap:4px}
+.mh-btn-g{width:26px;height:26px;border:none;border-radius:5px;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.15);color:#fff;transition:.15s}
+.mh-btn-g.mx{background:rgba(220,50,50,.75)}
+.mh-btn-g:hover{opacity:.8}
+.modal-body-g{padding:22px 18px 18px;overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:18px}
+.modal-foot-g{padding:12px 18px;border-top:1px solid #DDE3EE;display:flex;justify-content:flex-end;gap:8px;flex-shrink:0}
+.gist-field{display:flex;flex-direction:column;gap:6px}
+.gist-field label{font-weight:700;font-size:13px;color:#1B3A6B;display:block}
+.gist-field label span{font-weight:400;font-size:11px;color:#7A8AA0;margin-left:6px}
+.gist-field input{width:100%;padding:8px 11px;border:1.5px solid #DDE3EE;border-radius:8px;font-size:13px;font-family:inherit;outline:none;box-sizing:border-box;color:#1E2A3A}
+.gist-field input:focus{border-color:#2E5FA3}
+.gist-hint{font-size:11px;color:#7A8AA0}
+.btn-gist-p{padding:8px 20px;background:#1B3A6B;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;transition:.15s}
+.btn-gist-p:hover{background:#2E5FA3}
+.btn-gist-s{padding:8px 20px;background:#F4F6FA;color:#1E2A3A;border:1px solid #DDE3EE;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;transition:.15s}
+.btn-gist-s:hover{background:#DDE3EE}
+
+/* 모바일 */
+@media(max-width:700px){
+  #LP{width:100%;max-width:none;border-right:none;display:none}
+  #LP.ms{display:flex}
+  #RP{display:none}
+  #RP.ms{display:flex}
+  #RZ{display:none}
+  #MT{display:flex!important}
+}
+#MT{display:none;background:var(--fr);border-bottom:1px solid var(--ln)}
+.mt{flex:1;padding:9px;text-align:center;font-size:12px;color:#868E96;cursor:pointer;border-bottom:2px solid transparent}
+.mt.on{color:var(--ac);border-bottom-color:var(--ac)}
+</style>
+</head>
+<body>
+
+<!-- 로그인 -->
+<div id="LS">
+<div class="lcard">
+  <div class="ltop"><span>cutting_s</span></div>
+  <div class="lbody">
+    <div class="ltitle">로그인</div>
+    <div class="lsub">자재 재단 최적화 시스템</div>
+    <div class="lerr" id="lerr"></div>
+    <div class="lfld">
+      <label>아이디</label>
+      <input type="text" id="lUid" placeholder="아이디 입력" autocomplete="username">
+      <label class="lchk"><input type="checkbox" id="remId"> 아이디 저장</label>
+    </div>
+    <div class="lfld">
+      <label>비밀번호</label>
+      <input type="password" id="lPwd" placeholder="비밀번호 입력" autocomplete="current-password">
+      <label class="lchk"><input type="checkbox" id="remPw"> 비밀번호 저장</label>
+    </div>
+    <button class="lbtn" id="lBtn" onclick="doLogin()">로그인</button>
+    <div class="lver">v1.0 · cutting_s Web</div>
+  </div>
+</div>
+</div>
+
+<!-- 앱 -->
+<div id="AS">
+
+<!-- 메뉴바 -->
+<div id="MB">
+  <div class="mi" onclick="toggleMenu(this,event)">파일<div class="md">
+    <div class="mdi" onclick="menuAction(fbSave,event)">☁️ 클라우드 저장</div>
+    <div class="mdi" onclick="menuAction(fbLoad,event)">☁️ 클라우드 불러오기</div>
+    <div class="mdi" onclick="menuAction(fbBackups,event)">🕓 백업 목록</div>
+    <div class="mds"></div>
+    <div class="mdi" onclick="menuAction(localSave,event)">💾 기기 저장</div>
+    <div class="mdi" onclick="menuAction(localLoad,event)">📂 기기 열기</div>
+  </div></div>
+  <div class="mi" onclick="toggleMenu(this,event)">보기<div class="md">
+    <div class="mdi" onclick="menuAction(openStats,event)">📊 통계</div>
+    <div class="mdi" onclick="menuAction(openFull,event)">🔲 Full 보기</div>
+  </div></div>
+  <div class="mi" onclick="toggleMenu(this,event)">설정<div class="md">
+    <div class="mdi" onclick="menuAction(openUsers,event)">👤 아이디 추가/변경</div>
+    <div class="mds"></div>
+    <div class="mdi" onclick="menuAction(openGists,event)">🐙 GitHub Gists 설정</div>
+  </div></div>
+  <div class="mi" onclick="toggleMenu(this,event)">내보내기<div class="md">
+    <div class="mdi" onclick="menuAction(exportPDF,event)">📄 PDF 저장</div>
+    <div class="mdi" onclick="menuAction(exportExcel,event)">📊 Excel 저장</div>
+  </div></div>
+  <div class="mbr">
+    <span id="saveStatus" style="font-size:11px;color:var(--hd);display:flex;gap:6px;align-items:center;">
+      <span id="fbStatus" title="Firebase">☁️ —</span>
+      <span id="gistStatus2" title="GitHub Gist">🐙 —</span>
+    </span>
+    <span id="cuser"></span>
+    <button class="mbbtn" onclick="doLogout()">로그아웃</button>
+  </div>
+</div>
+
+<!-- 모바일 탭 -->
+<div id="MT">
+  <div class="mt on" id="mtIn" onclick="mobTab('in')">✏️ 입력</div>
+  <div class="mt" id="mtCv" onclick="mobTab('cv')">📐 배치</div>
+</div>
+
+<!-- 본문 -->
+<div id="ML">
+
+<!-- 왼쪽 -->
+<div id="LP">
+<div id="IS">
+
+  <!-- Name -->
+  <div class="nrow">
+    <label>Name:</label>
+    <input class="ninp" id="siteName" placeholder="현장명 입력" oninput="schedCalc()">
+  </div>
+
+  <!-- Film(원자재) 헤더 -->
+  <div style="border:1px solid var(--ln);border-radius:7px;padding:10px 10px 6px;margin-bottom:13px;background:var(--fr)">
+  <div class="slbl" style="margin-bottom:7px">🧵 원자재 (Film)<span class="sadd" onclick="addPanel()">+ Film 추가</span></div>
+  <div class="thdr" style="gap:3px;padding:4px 5px">
+    <span style="width:28px;flex-shrink:0;text-align:center">NO</span>
+    <span style="flex:2;min-width:0;text-align:left;padding-left:4px">이름</span>
+    <span style="flex:1.2;min-width:0;text-align:center">길이(mm)</span>
+    <span style="flex:1.2;min-width:0;text-align:center">폭(mm)</span>
+    <span style="width:34px;flex-shrink:0;text-align:center">Grain</span>
+    <span style="width:22px;flex-shrink:0"></span>
+  </div>
+  <div class="ptbl" id="panelTbl" style="margin-bottom:0"></div>
+  </div>
+
+  <!-- 조각 섹션들 -->
+  <div style="border:1px solid var(--ln);border-radius:7px;padding:10px 10px 6px;background:var(--fr)">
+  <div class="slbl" style="margin-bottom:7px">🔪 재단 조각 (Film별)</div>
+  <div id="partsSecs"></div>
+  </div>
+
+</div>
+<div id="BB">
+  <button class="abtn" onclick="openFull()">🔲 Full</button>
+  <button class="abtn sec" onclick="resetAll()">초기화</button>
+</div>
+</div>
+
+<!-- 리사이저 -->
+<div id="RZ"></div>
+
+<!-- 오른쪽 -->
+<div id="RP">
+  <div id="CT">
+    <div class="ftabs" id="filmTabs"></div>
+    <button id="btnTurn"  onclick="doTurn()"    title="Turn — 좌우 반전"   style="height:27px;padding:0 9px;font-size:11px;font-weight:700;border:1px solid var(--ln);border-radius:5px;background:var(--cv);color:var(--tx);cursor:pointer;font-family:var(--font);flex-shrink:0">Turn</button>
+    <div style="display:flex;border:1px solid var(--ln);border-radius:5px;overflow:hidden;flex-shrink:0;height:27px">
+      <button id="btnFlipX" onclick="doFlip('x')" title="Flip X — 가로↔세로" style="width:36px;font-size:10px;font-weight:700;border:none;background:var(--cv);color:var(--tx);cursor:pointer;font-family:var(--font)">⇔X</button>
+      <div style="width:1px;background:var(--ln)"></div>
+      <button id="btnFlipY" onclick="doFlip('y')" title="Flip Y — 상하 반전" style="width:36px;font-size:10px;font-weight:700;border:none;background:var(--cv);color:var(--tx);cursor:pointer;font-family:var(--font)">⇕Y</button>
+    </div>
+    <button class="zvbtn" onclick="zoom(1.2)" title="확대">+</button>
+    <button class="zvbtn" onclick="zoom(0.8)" title="축소">−</button>
+    <button class="zvbtn" onclick="resetZoom()" title="리셋">⟳</button>
+  </div>
+  <div id="CW"><canvas id="cv"></canvas></div>
+  <div id="IB"></div>
+</div>
+
+</div><!-- /ML -->
+</div><!-- /AS -->
+
+<!-- 색상 모달 -->
+<div class="mo" id="colorMo">
+<div class="mc" style="max-width:310px">
+  <div class="mct">색상 선택<button class="mcl" onclick="cmo(0)">✕</button></div>
+  <div class="cgrid" id="cg"></div>
+  <div class="mbs"><button class="mb_ s" onclick="cmo(0)">취소</button></div>
+</div></div>
+
+<!-- 통계 -->
+<div class="mo" id="statsMo">
+<div class="mc" style="max-width:480px">
+  <div class="mct">📊 통계<button class="mcl" onclick="cmo('statsMo')">✕</button></div>
+  <div id="statsC"></div>
+  <div class="mbs"><button class="mb_ s" onclick="cmo('statsMo')">닫기</button></div>
+</div></div>
+
+<!-- 계정 -->
+<div class="mo" id="usersMo">
+<div class="mc">
+  <div class="mct">👤 아이디 추가/변경<button class="mcl" onclick="cmo('usersMo')">✕</button></div>
+
+  <!-- 등록된 계정 목록 -->
+  <div style="margin-bottom:12px">
+    <div style="font-size:11px;font-weight:700;color:var(--hd);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">등록된 계정</div>
+    <div id="uList"><p style="font-size:12px;color:#868E96;padding:8px 0">불러오는 중...</p></div>
+  </div>
+
+  <!-- 추가/변경 폼 -->
+  <div style="background:var(--cv);border:1px solid var(--ln);border-radius:6px;padding:13px">
+    <div style="font-size:11px;font-weight:700;color:var(--hd);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">➕ 계정 추가 / 변경</div>
+    <div class="mf">
+      <label>아이디</label>
+      <input id="nUid" placeholder="아이디 입력" autocomplete="off">
+    </div>
+    <div class="mf">
+      <label>비밀번호</label>
+      <div style="position:relative;display:flex;align-items:center">
+        <input type="password" id="nPwd" placeholder="비밀번호 입력" autocomplete="off" style="flex:1;padding-right:36px">
+        <button onclick="togglePwVis('nPwd',this)" style="position:absolute;right:8px;background:none;border:none;cursor:pointer;font-size:14px;color:#868E96;padding:0;line-height:1">👁</button>
+      </div>
+    </div>
+    <button id="upsertBtn" class="abtn" style="font-size:12px;margin-top:4px" onclick="upsertUser()">✅ 추가 / 변경 적용</button>
+  </div>
+  <div class="mbs"><button class="mb_ s" onclick="cmo('usersMo')">닫기</button></div>
+</div></div>
+
+<!-- GitHub Gist 설정 -->
+<div class="modal-overlay" id="gistsMo">
+  <div class="modal-gist">
+    <div class="modal-head-g">
+      <h3>GitHub Gist 설정</h3>
+      <div class="modal-head-btns-g">
+        <button class="mh-btn-g mx" onclick="document.getElementById('gistsMo').classList.remove('show')">&#x2715;</button>
+      </div>
+    </div>
+    <div class="modal-body-g">
+
+      <!-- GitHub Token -->
+      <div class="gist-field">
+        <label>🔑 GitHub Token
+          <span>(Personal Access Token)</span>
+        </label>
+        <input type="password" id="gistToken"
+          placeholder="ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+          autocomplete="off">
+        <span class="gist-hint">GitHub → Settings → Developer settings → Personal access tokens → gist 권한 필요</span>
+      </div>
+
+      <!-- Gist ID -->
+      <div class="gist-field">
+        <label>📄 Gist ID
+          <span>(선택 — 비우면 새로 생성)</span>
+        </label>
+        <input type="text" id="gistId"
+          placeholder="예) a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4"
+          autocomplete="off">
+        <span class="gist-hint">저장 후 생성된 Gist ID가 자동 기록됩니다</span>
+      </div>
+
+    </div>
+    <div class="modal-foot-g">
+      <button class="btn-gist-s" onclick="document.getElementById('gistsMo').classList.remove('show')">취소</button>
+      <button class="btn-gist-p" onclick="saveGistSettings()">저장</button>
+    </div>
+  </div>
+</div>
+
+<!-- 백업 -->
+<div class="mo" id="backupMo">
+<div class="mc">
+  <div class="mct">🕓 백업 목록<button class="mcl" onclick="cmo('backupMo')">✕</button></div>
+  <p style="font-size:11px;color:#868E96;margin-bottom:9px">클릭하면 해당 시점으로 복원됩니다.</p>
+  <div id="bkList"></div>
+  <div class="mbs"><button class="mb_ s" onclick="cmo('backupMo')">닫기</button></div>
+</div></div>
+
+<!-- Full 보기 -->
+<div class="mo" id="fullMo" style="background:rgba(0,0,0,.78)">
+<div class="mc" style="width:100vw;max-width:none;height:100vh;max-height:none;padding:0;display:flex;flex-direction:column;border-radius:0">
+  <div style="height:38px;background:var(--fr);border-bottom:1px solid var(--ln);border-radius:10px 10px 0 0;display:flex;align-items:center;gap:5px;padding:0 9px;flex-shrink:0">
+    <span style="font-size:12px;font-weight:700;color:var(--hd)">전체 보기</span>
+    <div class="ftabs" id="fullTabs" style="margin-left:7px"></div>
+    <button id="fBtnTurn"  onclick="doTurnF()"    title="Turn" style="height:27px;padding:0 9px;font-size:11px;font-weight:700;border:1px solid var(--ln);border-radius:5px;background:var(--cv);color:var(--tx);cursor:pointer;font-family:var(--font);flex-shrink:0">Turn</button>
+    <div style="display:flex;border:1px solid var(--ln);border-radius:5px;overflow:hidden;flex-shrink:0;height:27px">
+      <button id="fBtnFlipX" onclick="doFlipF('x')" title="Flip X" style="width:36px;font-size:10px;font-weight:700;border:none;background:var(--cv);color:var(--tx);cursor:pointer;font-family:var(--font)">⇔X</button>
+      <div style="width:1px;background:var(--ln)"></div>
+      <button id="fBtnFlipY" onclick="doFlipF('y')" title="Flip Y" style="width:36px;font-size:10px;font-weight:700;border:none;background:var(--cv);color:var(--tx);cursor:pointer;font-family:var(--font)">⇕Y</button>
+    </div>
+    <button class="zvbtn" onclick="fzoom(1.2)">+</button>
+    <button class="zvbtn" onclick="fzoom(0.8)">−</button>
+    <button class="zvbtn" onclick="fresetZoom()">⟳</button>
+    <button id="lineModeBtn" onclick="openLineMode()" title="라인모드 (프로젝터용)" style="font-size:11px;width:auto;padding:0 10px;background:#0B7285;color:#fff;border:1px solid #0B7285;border-radius:5px;height:27px;cursor:pointer;font-weight:700;flex-shrink:0">☰ Line Mode</button>
+    <button class="abtn sec" style="flex:0;padding:4px 11px;font-size:11px;margin-left:4px;white-space:nowrap;line-height:1.4;display:flex;align-items:center;gap:3px" onclick="cmo('fullMo')">✕ 닫기</button>
+  </div>
+  <canvas id="fullCv"></canvas>
+</div></div>
+
+<!-- Line Mode 모달 (Python 원본 open_line_mode() 동일) -->
+<div id="lineMo" style="display:none;position:fixed;inset:0;z-index:1200;background:#000;flex-direction:column">
+  <!-- 라인모드 캔버스 -->
+  <canvas id="lmCv" style="flex:1;display:block;width:100%;cursor:crosshair;background:#000"></canvas>
+  <!-- 상태 라벨 (좌하단) -->
+  <div id="lmFocusLbl" style="position:absolute;left:12px;bottom:10px;font-size:11px;font-weight:700;color:#74C0FC;font-family:'맑은 고딕',sans-serif;pointer-events:none">전체보기  |  ▶ 로 이동</div>
+  <!-- 제어판 토글 버튼 (우상단) -->
+  <button id="lmCtrlBtn" onclick="lmToggleCtrl()" style="position:absolute;right:10px;top:10px;background:#1A1D23;color:#ADB5BD;border:none;border-radius:5px;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;font-family:'맑은 고딕',sans-serif">☰ 제어판</button>
+  <!-- 제어판 패널 (드래그 이동 가능) -->
+  <div id="lmCtrl" style="position:absolute;right:10px;top:40px;width:268px;background:#16181E;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,.6);z-index:10;overflow:hidden;cursor:default">
+    <!-- 드래그 핸들 -->
+    <div id="lmCtrlHandle" style="height:28px;background:#1E2128;border-bottom:1px solid #2A2D36;display:flex;align-items:center;padding:0 8px;cursor:grab;user-select:none;gap:6px">
+      <span style="font-size:9px;color:#6B7280;letter-spacing:1px;flex:1">⠿ 제어판 (드래그로 이동)</span>
+      <button onclick="lmToggleLayout(event)" id="lmLayoutBtn" title="가로/세로 전환" style="background:#252830;color:#ADB5BD;border:1px solid #2A2D36;border-radius:3px;padding:1px 7px;font-size:9px;cursor:pointer;font-family:inherit;flex-shrink:0;pointer-events:all">⇆ 가로</button>
+    </div>
+    <div id="lmCtrlBody">
+    <!-- 섹션1: 라인 색상 -->
+    <div style="padding:8px 10px 0">
+      <div style="font-size:9px;font-weight:700;color:#6B7280;margin-bottom:3px">● 라인 색상</div>
+      <div id="lmLineSwatches" style="background:#1E2128;border:1px solid #2A2D36;border-radius:5px;padding:6px 8px;display:flex;gap:4px;flex-wrap:wrap"></div>
+    </div>
+    <!-- 섹션2: 그리드 색상 -->
+    <div style="padding:8px 10px 0">
+      <div style="font-size:9px;font-weight:700;color:#6B7280;margin-bottom:3px">▦ 그리드 색상</div>
+      <div id="lmGridSwatches" style="background:#1E2128;border:1px solid #2A2D36;border-radius:5px;padding:6px 8px;display:flex;gap:3px;flex-wrap:wrap"></div>
+    </div>
+    <!-- 섹션3: X 오프셋 -->
+    <div style="padding:8px 10px 0">
+      <div style="font-size:9px;font-weight:700;color:#6B7280;margin-bottom:3px">↔ X 오프셋</div>
+      <div style="background:#1E2128;border:1px solid #2A2D36;border-radius:5px;padding:6px 8px;display:flex;align-items:center;gap:8px">
+        <span style="font-size:10px;color:#6B7280">오프셋</span>
+        <button onclick="lmOxStep(-100)" style="background:#252830;color:#CDD0D6;border:1px solid #2A2D36;border-radius:3px;padding:2px 7px;cursor:pointer;font-size:12px">◀</button>
+        <input id="lmOxInp" type="number" value="0" style="width:60px;background:#252830;color:#CDD0D6;border:1px solid #2A2D36;border-radius:3px;padding:2px 5px;font-size:11px;text-align:center" oninput="lmDraw()">
+        <button onclick="lmOxStep(+100)" style="background:#252830;color:#CDD0D6;border:1px solid #2A2D36;border-radius:3px;padding:2px 7px;cursor:pointer;font-size:12px">▶</button>
+        <span style="font-size:10px;color:#6B7280">px</span>
+      </div>
+    </div>
+    <!-- 섹션4: 뷰 컨트롤 -->
+    <div style="padding:8px 10px 0">
+      <div style="font-size:9px;font-weight:700;color:#6B7280;margin-bottom:3px">⊞ 뷰 컨트롤</div>
+      <div style="background:#1E2128;border:1px solid #2A2D36;border-radius:5px;padding:6px 8px">
+        <div style="display:flex;gap:6px;align-items:flex-end">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:2px">
+            <span style="font-size:9px;color:#6B7280">줌</span>
+            <div style="display:flex;gap:2px">
+              <button onclick="lmZoom(1.2)" style="background:#1D4ED8;color:#fff;border:none;border-radius:3px;width:26px;padding:4px 0;cursor:pointer;font-size:13px;font-weight:700">＋</button>
+              <button onclick="lmZoom(0.833)" style="background:#1D4ED8;color:#fff;border:none;border-radius:3px;width:26px;padding:4px 0;cursor:pointer;font-size:13px;font-weight:700">－</button>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:2px">
+            <span style="font-size:9px;color:#6B7280">조각</span>
+            <div style="display:flex;gap:2px">
+              <button onclick="lmNav(-1)" style="background:#4338CA;color:#fff;border:none;border-radius:3px;width:26px;padding:4px 0;cursor:pointer;font-size:13px;font-weight:700">◀</button>
+              <button onclick="lmNav(+1)" style="background:#4338CA;color:#fff;border:none;border-radius:3px;width:26px;padding:4px 0;cursor:pointer;font-size:13px;font-weight:700">▶</button>
+            </div>
+          </div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:2px">
+            <span style="font-size:9px;color:#6B7280">리셋</span>
+            <button onclick="lmReset()" style="background:#065F46;color:#fff;border:none;border-radius:3px;width:26px;padding:4px 0;cursor:pointer;font-size:14px;font-weight:700">⟳</button>
+          </div>
+        </div>
+        <div style="font-size:9px;color:#6B7280;margin-top:5px">🖱 마우스휠로도 확대 / 축소 가능</div>
+      </div>
+    </div>
+    <!-- 섹션5: 색회전 -->
+    <div style="padding:8px 10px 0">
+      <div style="font-size:9px;font-weight:700;color:#6B7280;margin-bottom:3px">🎨 색회전</div>
+      <div style="background:#1E2128;border:1px solid #2A2D36;border-radius:5px;overflow:hidden">
+        <button id="lmCrBtn" onclick="lmToggleCr()" style="width:100%;background:#1E2128;color:#6B7280;border:none;padding:7px;cursor:pointer;font-size:11px;font-weight:700;font-family:'맑은 고딕',sans-serif;border:1px solid #2A2D36">○ 색회전  OFF</button>
+        <div style="font-size:9px;color:#6B7280;padding:0 8px 6px;text-align:center">조각마다 다른 색으로 구분 표시</div>
+      </div>
+    </div>
+    <!-- 섹션6: 조각 라인 굵기 -->
+    <div style="padding:8px 10px 0">
+      <div style="font-size:9px;font-weight:700;color:#6B7280;margin-bottom:3px">━ 조각 라인 굵기</div>
+      <div style="background:#1E2128;border:1px solid #2A2D36;border-radius:5px;padding:8px">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+          <span style="font-size:9px;color:#ADB5BD;width:56px;flex-shrink:0">조각라인</span>
+          <input id="lmPartLW" type="range" min="1" max="12" step="0.5" value="2"
+            style="flex:1;accent-color:#34D399;cursor:pointer"
+            oninput="document.getElementById('lmPartLWVal').textContent=this.value;lmDraw()"
+            onmousedown="this.dataset.focused='1'" onblur="this.dataset.focused='0'">
+          <span id="lmPartLWVal" style="font-size:10px;color:#34D399;width:26px;text-align:right;font-weight:700">2</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <span style="font-size:9px;color:#ADB5BD;width:56px;flex-shrink:0">그리드</span>
+          <input id="lmGridLW" type="range" min="0.5" max="4" step="0.5" value="1"
+            style="flex:1;accent-color:#9CA3AF;cursor:pointer"
+            oninput="document.getElementById('lmGridLWVal').textContent=this.value;lmDraw()"
+            onmousedown="this.dataset.focused='1'" onblur="this.dataset.focused='0'">
+          <span id="lmGridLWVal" style="font-size:10px;color:#9CA3AF;width:26px;text-align:right;font-weight:700">1</span>
+        </div>
+      </div>
+    </div>
+    <!-- 섹션6b: 원자재 라인 굵기 -->
+    <div style="padding:8px 10px 0">
+      <div style="font-size:9px;font-weight:700;color:#6B7280;margin-bottom:3px">━ 원자재 라인 굵기</div>
+      <div style="background:#1E2128;border:1px solid #2A2D36;border-radius:5px;padding:8px">
+        <div style="display:flex;align-items:center;gap:6px;">
+          <span style="font-size:9px;color:#ADB5BD;width:56px;flex-shrink:0">원자재</span>
+          <input id="lmPanelLW" type="range" min="1" max="12" step="0.5" value="3"
+            style="flex:1;accent-color:#60A5FA;cursor:pointer"
+            oninput="document.getElementById('lmPanelLWVal').textContent=this.value;lmDraw()"
+            onmousedown="this.dataset.focused='1'" onblur="this.dataset.focused='0'">
+          <span id="lmPanelLWVal" style="font-size:10px;color:#60A5FA;width:26px;text-align:right;font-weight:700">3</span>
+        </div>
+      </div>
+    </div>
+    <!-- 섹션6c: 텍스트 크기 -->
+    <div style="padding:8px 10px 0">
+      <div style="font-size:9px;font-weight:700;color:#6B7280;margin-bottom:3px">✎ 텍스트 크기</div>
+      <div style="background:#1E2128;border:1px solid #2A2D36;border-radius:5px;padding:8px">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+          <span style="font-size:9px;color:#ADB5BD;width:56px;flex-shrink:0">조각이름</span>
+          <input id="lmNameFS" type="range" min="6" max="32" step="1" value="14"
+            style="flex:1;accent-color:#FBBF24;cursor:pointer"
+            oninput="document.getElementById('lmNameFSVal').textContent=this.value;lmDraw()"
+            onmousedown="this.dataset.focused='1'" onblur="this.dataset.focused='0'">
+          <span id="lmNameFSVal" style="font-size:10px;color:#FBBF24;width:26px;text-align:right;font-weight:700">14</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <span style="font-size:9px;color:#ADB5BD;width:56px;flex-shrink:0">치수숫자</span>
+          <input id="lmDimFS" type="range" min="5" max="24" step="1" value="11"
+            style="flex:1;accent-color:#F87171;cursor:pointer"
+            oninput="document.getElementById('lmDimFSVal').textContent=this.value;lmDraw()"
+            onmousedown="this.dataset.focused='1'" onblur="this.dataset.focused='0'">
+          <span id="lmDimFSVal" style="font-size:10px;color:#F87171;width:26px;text-align:right;font-weight:700">11</span>
+        </div>
+      </div>
+    </div>
+    <!-- 섹션7: 회전/반전 -->
+    <div class="lm-sec" style="padding:8px 10px 0">
+      <div style="font-size:9px;font-weight:700;color:#6B7280;margin-bottom:3px">↺ 회전 / 반전</div>
+      <div style="background:#1E2128;border:1px solid #2A2D36;border-radius:5px;padding:6px 8px;display:flex;gap:4px">
+        <button id="lmBtnTurn"  onclick="lmDoTurn()"    style="flex:1;background:#252830;color:#ADB5BD;border:1px solid #2A2D36;border-radius:4px;padding:5px 4px;cursor:pointer;font-size:10px;font-weight:700;font-family:'맑은 고딕',sans-serif">Turn</button>
+        <button id="lmBtnFlipX" onclick="lmDoFlip('x')" style="flex:1;background:#252830;color:#ADB5BD;border:1px solid #2A2D36;border-radius:4px;padding:5px 4px;cursor:pointer;font-size:10px;font-weight:700;font-family:'맑은 고딕',sans-serif">⇔X</button>
+        <button id="lmBtnFlipY" onclick="lmDoFlip('y')" style="flex:1;background:#252830;color:#ADB5BD;border:1px solid #2A2D36;border-radius:4px;padding:5px 4px;cursor:pointer;font-size:10px;font-weight:700;font-family:'맑은 고딕',sans-serif">⇕Y</button>
+      </div>
+    </div>
+    </div><!-- /lmCtrlBody -->
+    <!-- 하단 버튼 -->
+    <div style="padding:10px">
+      <button onclick="lmToggleCtrl()" style="width:100%;background:#1E2128;color:#6B7280;border:1px solid #2A2D36;border-radius:5px;padding:7px;cursor:pointer;font-size:11px;font-family:'맑은 고딕',sans-serif;margin-bottom:4px">▼  최소화</button>
+      <button onclick="closeLineMode()" style="width:100%;background:#7F1D1D;color:#FCA5A5;border:none;border-radius:5px;padding:8px;cursor:pointer;font-size:11px;font-weight:700;font-family:'맑은 고딕',sans-serif">✕  라인모드 종료</button>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="fileInp" accept=".json" style="display:none" onchange="onFileLoad(event)">
+
+<!-- Size Over 모달 -->
+<div class="adj-drop" id="adjDrop">
+  <button id="adjDropPlus" style="color:#1971C2">＋ 증가</button>
+  <button id="adjDropMinus" style="color:#C92A2A">－ 감소</button>
+</div>
+<div class="mo" id="soMo" tabindex="-1">
+<div class="mc" style="max-width:320px">
+  <div class="mct" style="color:#E03131">⚠️ Size Over</div>
+  <p id="soMsg" style="white-space:pre-line;font-size:13px;line-height:1.6;color:var(--tx);padding:4px 0 12px"></p>
+  <div class="mbs" style="justify-content:center"><button class="mb_ p" id="soOk" style="padding:8px 32px">확인</button></div>
+</div></div>
+
+<!-- 요약 팝업 모달 -->
+<div class="mo" id="sumMo">
+<div class="mc" style="max-width:340px">
+  <div class="mct">📋 배치 요약<button class="mcl" onclick="cmo('sumMo')">✕</button></div>
+  <div id="sumC"></div>
+  <div class="mbs"><button class="mb_ s" onclick="cmo('sumMo')">닫기</button></div>
+</div></div>
+
+<div id="toast"></div>
+
+<script>
+/* === 상수 === */
+const COLORS=["#E03131","#C2255C","#9C36B5","#6741D9","#3B5BDB","#1971C2","#0B7285","#087F5B","#2B8A3E","#5C940D","#E67700","#D9480F","#F03E3E","#D6336C","#AE3EC9","#7048E8","#4263EB","#1C7ED6","#1098AD","#0CA678","#37B24D","#74B816","#F59F00","#F76707"];
+let cidx=0;
+function nc(){return COLORS[cidx++%COLORS.length];}
+function cc(h){const r=parseInt(h.slice(1,3),16),g=parseInt(h.slice(3,5),16),b=parseInt(h.slice(5,7),16);return(r*299+g*587+b*114)/1000>180?"#333":"#FFF";}
+function fd(mm){
+  // PC앱 format_dim 동일: 정수면 정수, 아니면 불필요한 0 제거
+  const m=mm/1000;
+  if(Number.isInteger(m))return String(m);
+  return parseFloat(m.toFixed(3)).toString();
+}
+// 패널 치수 표시: 입력된 mm값 그대로 표시 (m 변환 없음)
+// 예: 10000 → "10000mm", 1220 → "1220mm"
+// 조각 표시명: 원자재이름-(조각이름) 형식
+function partLabel(panelName, partName){
+  const pn=(panelName||"").trim();
+  const pt=(partName||"").trim();
+  if(pn&&pt) return pn+"("+pt+")";  // - 삭제
+  if(pt) return pt;
+  if(pn) return pn;
+  return "";
+}
+// 여백에 따라 한 줄 또는 두 줄 반환
+// returns {single, twoLine, line1, line2}
+function partLabelLines(panelName, partName, boxW, boxH, fs){
+  const pn=(panelName||"").trim();
+  const pt=(partName||"").trim();
+  if(!pn&&!pt) return {single:"",twoLine:false,line1:"",line2:""};
+  if(!pn) return {single:pt,twoLine:false,line1:pt,line2:""};
+  if(!pt) return {single:pn,twoLine:false,line1:pn,line2:""};
+  const single=pn+"("+pt+")";
+  // 한 줄 폭 추정 (폰트 크기 × 문자 수 × 0.65)
+  const singleW=fs*single.length*0.65;
+  if(singleW<=boxW*0.88){
+    return {single,twoLine:false,line1:single,line2:""};
+  }
+  // 두 줄: 원자재이름 위, (조각이름) 아래
+  return {single:"",twoLine:true,line1:pn,line2:"("+pt+")"};
+}
+function fdPanel(mm){
+  const v=parseFloat(mm)||0;
+  if(v<=0)return "?";
+  return Math.round(v)+"(mm)";
+}
+function esc(s){return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
+function tod(){return new Date().toISOString().split("T")[0];}
+
+/* === 상태 === */
+let panels=[],parts=[],results=[];
+let curFilm=0,cvS=1,cvX=0,cvY=0,fS=1,fX=0,fY=0,fF=0;
+let flipX=[],flipY=[],turnSt=[]; // PC앱 flip_x/flip_y/turn_states
+let calcT=null,CU="",_cTgt={pi:-1,ji:-1};
+let lineMode=false,gridMode=false;
+let _sumBox=null;   // 메인 캔버스 요약 박스 좌표
+let _fSumBox=null;  // Full 캔버스 요약 박스 좌표
+
+/* === 초기화 === */
+window.addEventListener("DOMContentLoaded",()=>{
+  const ri=sessionStorage.getItem("cut_ri")==="1",rp=sessionStorage.getItem("cut_rp")==="1";
+  document.getElementById("remId").checked=ri;
+  document.getElementById("remPw").checked=rp;
+  if(ri) document.getElementById("lUid").value=sessionStorage.getItem("cut_uid")||"";
+  ["lUid","lPwd"].forEach(id=>document.getElementById(id).addEventListener("keydown",e=>{if(e.key==="Enter")doLogin();}));
+  /* 앱 최초 실행 시 전체창 */
+  try{ if(window.screen && window.outerWidth < window.screen.availWidth) window.moveTo(0,0),window.resizeTo(window.screen.availWidth, window.screen.availHeight); }catch(e){}
+  /* 메뉴 외부 클릭 시 닫기 */
+  document.addEventListener("click",e=>{
+    if(!e.target.closest(".mi"))
+      document.querySelectorAll(".mi.open").forEach(m=>m.classList.remove("open"));
+  });
+  buildCG();initRZ();
+});
+
+/* === 메뉴 토글 === */
+function toggleMenu(el, e){
+  if(e) e.stopPropagation();
+  const isOpen = el.classList.contains("open");
+  document.querySelectorAll(".mi.open").forEach(m=>m.classList.remove("open"));
+  if(!isOpen) el.classList.add("open");
+}
+function menuAction(fn, e){
+  /* 메뉴 항목 클릭 시 메뉴 닫고 해당 함수 실행 */
+  if(e) e.stopPropagation();
+  document.querySelectorAll(".mi.open").forEach(m=>m.classList.remove("open"));
+  if(typeof fn === "function") fn();
+}
+
+/* === 로그인 === */
+async function doLogin(){
+  const uid=document.getElementById("lUid").value.trim(),pwd=document.getElementById("lPwd").value.trim();
+  if(!uid||!pwd){showLE("아이디와 비밀번호를 입력하세요.");return;}
+  const btn=document.getElementById("lBtn");btn.textContent="확인 중...";btn.disabled=true;
+  let w=0;while(!window._fbReady&&w<30){await new Promise(r=>setTimeout(r,100));w++;}
+  const users=window._fbReady?await window._fbGetUsers():{};
+  if(!Object.keys(users).length){showLE("계정 정보를 불러올 수 없습니다. 새로고침 후 시도하세요.");btn.textContent="로그인";btn.disabled=false;return;}
+
+  /* 입력 비밀번호를 SHA-256 해시로 변환 후 비교 */
+  const pwHash = window._sha256 ? await window._sha256(pwd) : pwd;
+
+  /* 기존 평문 저장 계정 자동 마이그레이션 지원
+     — 저장값이 64자(해시) 이면 해시비교, 아니면 평문비교 후 해시로 업그레이드 */
+  let matched = false;
+  if(users[uid]){
+    const stored = users[uid];
+    if(stored.length === 64){
+      matched = stored === pwHash;
+    } else {
+      /* 평문 계정 — 일치하면 해시로 자동 업그레이드 */
+      if(stored === pwd){
+        matched = true;
+        users[uid] = pwHash;
+        if(window._fbSaveUsers) window._fbSaveUsers(users);
+      }
+    }
+  }
+
+  if(matched){
+    const ri=document.getElementById("remId").checked,rp=document.getElementById("remPw").checked;
+    sessionStorage.setItem("cut_ri",ri?"1":"0");
+    sessionStorage.setItem("cut_rp",rp?"1":"0");
+    sessionStorage.setItem("cut_uid",ri?uid:"");
+    /* 비밀번호는 해시값으로 저장 (평문 저장 안 함) */
+    sessionStorage.setItem("cut_pw",rp?pwHash:"");
+    CU=uid;document.getElementById("cuser").textContent=uid;
+    document.getElementById("LS").style.display="none";
+    document.getElementById("AS").classList.add("on");
+    initCanvas();addPanel();
+    setTimeout(autoLoad,800);
+  }else{
+    showLE("아이디 또는 비밀번호가 일치하지 않습니다.");
+    btn.textContent="로그인";btn.disabled=false;
+  }
+}
+function doLogout(){
+  CU="";document.getElementById("AS").classList.remove("on");
+  document.getElementById("LS").style.display="";
+  document.getElementById("lPwd").value="";
+  const btn=document.getElementById("lBtn");btn.textContent="로그인";btn.disabled=false;
+  panels=[];parts=[];results=[];cidx=0;
+}
+function showLE(m){const e=document.getElementById("lerr");e.textContent=m;e.classList.remove("show");void e.offsetWidth;e.classList.add("show");}
+
+/* === 패널 렌더 === */
+function addPanel(d={}){
+  panels.push({name:d.name||"",length:d.length||"",width:d.width||"",grain:d.grain||false});
+  parts.push([{name:"",length:"",width:"",quantity:1,color:nc()}]);
+  flipX.push(false);flipY.push(false);turnSt.push(false);
+  renderPanelTbl();renderPartsSecs();schedCalc();
+}
+function removePanel(i){
+  if(panels.length<=1){toast("Film은 최소 1개 필요합니다");return;}
+  panels.splice(i,1);parts.splice(i,1);
+  flipX.splice(i,1);flipY.splice(i,1);turnSt.splice(i,1);
+  renderPanelTbl();renderPartsSecs();schedCalc();
+}
+function renderPanelTbl(){
+  const tbl=document.getElementById("panelTbl");tbl.innerHTML="";
+  panels.forEach((p,i)=>{
+    const row=document.createElement("div");row.className="prow";
+    // NO 버튼
+    const nb=mkBtn("nobtn",i+1,()=>scrollToSec(i));nb.style.width="28px";
+    // 이름 (flex:2)
+    const n=mkInp("ci","text",p.name||"","Film명",v=>{panels[i].name=v;updSecTitle(i);schedCalc();},"name");
+    n.style.flex="2";n.style.minWidth="0";
+    n.addEventListener("keydown",e=>panKey(e,i,"name"));
+    // 길이 (flex:1.2) — input 이벤트는 데이터 저장만, DOM 재생성 절대 없음
+    const l=mkInp("ci","number",p.length||"","길이",v=>{panels[i].length=+v;schedCalc();},"length");
+    l.style.flex="1.2";l.style.minWidth="0";
+    l.addEventListener("keydown",e=>panKey(e,i,"length"));
+    // blur 시 폭 기본값 설정 (포커스가 이미 떠난 후이므로 안전)
+    l.addEventListener("blur",()=>{
+      if(panels[i].length>0&&!panels[i].width){
+        panels[i].width=1220;
+        const rows=document.querySelectorAll("#panelTbl .prow");
+        if(rows[i]){const wi=rows[i].querySelector('input[data-col="width"]');if(wi&&!wi.value)wi.value=1220;}
+        schedCalc();
+      }
+    });
+    // 폭 (flex:1.2)
+    const w=mkInp("ci","number",p.width||"","폭",v=>{panels[i].width=+v;schedCalc();},"width");
+    w.style.flex="1.2";w.style.minWidth="0";
+    w.addEventListener("keydown",e=>panKey(e,i,"width"));
+    // 폭 blur — 마지막 행 채워졌을 때만 새 행 추가 (blur 시점 = 입력 완료)
+    w.addEventListener("blur",()=>chkAddPanel(i));
+    // Grain (34px)
+    const cb=document.createElement("input");cb.type="checkbox";cb.className="gcb";cb.style.width="34px";cb.style.flexShrink="0";cb.checked=p.grain;
+    cb.addEventListener("change",()=>{panels[i].grain=cb.checked;schedCalc();});
+    // 삭제 (22px)
+    const del=mkBtn("delbtn","×",()=>removePanel(i));del.style.width="22px";
+    row.append(nb,n,l,w,cb,del);tbl.appendChild(row);
+  });
+}
+// Enter/Tab/화살표 키: 같은 행의 다음 열로 이동 (폭 마지막이면 다음 Film 행 이름으로)
+function panKey(e,pi,col){
+  const colOrder=["name","length","width"];
+  const rows=document.querySelectorAll("#panelTbl .prow");
+  const curIdx=colOrder.indexOf(col);
+  // 방향키 처리
+  if(e.key==="ArrowRight"){
+    e.preventDefault();
+    if(curIdx<colOrder.length-1){
+      const inp=rows[pi].querySelector(`input[data-col="${colOrder[curIdx+1]}"]`);
+      if(inp){inp.focus();inp.select();}
+    }
+    return;
+  }
+  if(e.key==="ArrowLeft"){
+    e.preventDefault();
+    if(curIdx>0){
+      const inp=rows[pi].querySelector(`input[data-col="${colOrder[curIdx-1]}"]`);
+      if(inp){inp.focus();inp.select();}
+    }
+    return;
+  }
+  if(e.key==="ArrowDown"){
+    e.preventDefault();
+    if(pi<rows.length-1){
+      const inp=rows[pi+1].querySelector(`input[data-col="${col}"]`);
+      if(inp){inp.focus();inp.select();}
+    }
+    return;
+  }
+  if(e.key==="ArrowUp"){
+    e.preventDefault();
+    if(pi>0){
+      const inp=rows[pi-1].querySelector(`input[data-col="${col}"]`);
+      if(inp){inp.focus();inp.select();}
+    }
+    return;
+  }
+  const isEnter=e.key==="Enter",isTab=e.key==="Tab"&&!e.shiftKey;
+  if(!isEnter&&!isTab)return;
+  // Tab: 폭→다음 행 이름 (또는 마지막이면 조각 섹션)
+  if(isTab&&col==="width"){
+    e.preventDefault();
+    if(pi<rows.length-1){
+      const inp=rows[pi+1].querySelector('input[data-col="name"]');
+      if(inp){inp.focus();inp.select();}
+    } else {
+      setTimeout(()=>{
+        const s=document.getElementById(`cs_${pi}`);
+        if(s){const inp=s.querySelector("input.ci");if(inp){inp.focus();inp.select();}}
+      },80);
+    }
+    return;
+  }
+  if(!isEnter)return;
+  e.preventDefault();
+  if(curIdx<colOrder.length-1){
+    // 다음 열
+    const inp=rows[pi].querySelector(`input[data-col="${colOrder[curIdx+1]}"]`);
+    if(inp){inp.focus();inp.select();}
+  } else if(pi<rows.length-1){
+    // 다음 행 이름
+    const inp=rows[pi+1].querySelector('input[data-col="name"]');
+    if(inp){inp.focus();inp.select();}
+  } else {
+    // 마지막 Film 폭에서 Enter → blur가 chkAddPanel 트리거, 새 행 생성 후 조각 섹션으로
+    setTimeout(()=>{
+      const s=document.getElementById(`cs_${pi}`);
+      if(s){const inp=s.querySelector("input.ci");if(inp){inp.focus();inp.select();}}
+    },80);
+  }
+}
+// 마지막 행 폭 blur 시에만 새 Film 행 자동 추가
+function chkAddPanel(i){
+  if(i!==panels.length-1)return;
+  const p=panels[i];
+  if(+p.length>0&&+p.width>0)addPanel();
+}
+
+/* === 조각 섹션 === */
+function renderPartsSecs(){
+  const wrap=document.getElementById("partsSecs");
+  const cur=wrap.querySelectorAll(".csec").length;
+  // 초과분 제거
+  if(cur>panels.length){
+    const all=wrap.querySelectorAll(".csec");
+    for(let i=panels.length;i<cur;i++)all[i].remove();
+  }
+  // 부족분 추가
+  for(let i=cur;i<panels.length;i++)wrap.appendChild(buildSec(i));
+  // 타이틀 갱신
+  panels.forEach((_,i)=>updSecTitle(i));
+}
+function updSecTitle(i){const e=document.getElementById(`sn_${i}`);if(e)e.textContent=panels[i].name||"Film";}
+function scrollToSec(i){const s=document.getElementById(`cs_${i}`);if(s)s.scrollIntoView({behavior:"smooth",block:"start"});}
+
+function buildSec(pi){
+  const sec=document.createElement("div");sec.className="csec";sec.id=`cs_${pi}`;
+  // 타이틀
+  const tr=document.createElement("div");tr.className="ctitle";
+  const no=document.createElement("div");no.className="cno";no.textContent=pi+1;no.title="Film으로 이동";
+  no.addEventListener("click",()=>{const r=document.querySelectorAll("#panelTbl .prow");if(r[pi])r[pi].querySelector("input").focus();});
+  const nm=document.createElement("span");nm.className="cname";nm.id=`sn_${pi}`;nm.textContent=panels[pi]?.name||"Film";
+  const ab=document.createElement("button");ab.className="cadd";ab.textContent="+ 조각 추가";ab.addEventListener("click",()=>addPart(pi));
+
+  // ── adj 조정 UI ──────────────────────────────────────
+  const adjCell=document.createElement("div");adjCell.className="adj-cell";
+  const signBtn=document.createElement("button");signBtn.className="adj-sign";signBtn.textContent="+";signBtn.title="증가/감소 선택";
+  const adjInp=document.createElement("input");adjInp.className="adj-inp";adjInp.type="number";adjInp.min="0";adjInp.placeholder="0";adjInp.title="조정값(mm)";
+  const adjUnit=document.createElement("span");adjUnit.className="adj-unit";adjUnit.textContent="mm";
+  adjCell.append(signBtn,adjInp,adjUnit);
+
+  // 드롭다운 연동
+  signBtn.addEventListener("click",(e)=>{
+    e.stopPropagation();
+    const drop=document.getElementById("adjDrop");
+    const rect=signBtn.getBoundingClientRect();
+    drop.style.left=rect.left+"px";
+    drop.style.top=(rect.bottom+2)+"px";
+    drop.classList.toggle("on");
+    // 현재 모드 표시
+    document.getElementById("adjDropPlus").style.fontWeight=signBtn.dataset.mode==="-"?"400":"700";
+    document.getElementById("adjDropMinus").style.fontWeight=signBtn.dataset.mode==="-"?"700":"400";
+    // 외부 클릭 닫기
+    const close=()=>{drop.classList.remove("on");document.removeEventListener("click",close);};
+    setTimeout(()=>document.addEventListener("click",close),10);
+    document.getElementById("adjDropPlus").onclick=()=>{
+      signBtn.textContent="+";signBtn.className="adj-sign";signBtn.dataset.mode="+";
+      drop.classList.remove("on");_adjRefresh(pi);
+    };
+    document.getElementById("adjDropMinus").onclick=()=>{
+      signBtn.textContent="−";signBtn.className="adj-sign minus";signBtn.dataset.mode="-";
+      drop.classList.remove("on");_adjRefresh(pi);
+    };
+  });
+  adjInp.addEventListener("input",()=>_adjRefresh(pi));
+  signBtn.dataset.mode="+";
+  signBtn.dataset.pi=pi;
+  adjInp.dataset.pi=pi;
+  adjCell.dataset.pi=pi;
+  // 기존 저장값 복원
+  if(window._adjState&&window._adjState[pi]){
+    const s=window._adjState[pi];
+    adjInp.value=s.val||"";
+    if(s.mode==="-"){signBtn.textContent="−";signBtn.className="adj-sign minus";signBtn.dataset.mode="-";}
+  }
+
+  tr.append(no,nm,adjCell,ab);
+  // 헤더
+  const hdr=document.createElement("div");hdr.className="thdr";
+  [["이름","flex:1.8;text-align:left;padding-left:4px;min-width:0"],["길이(mm)","width:100px;flex-shrink:0"],["폭(mm)","width:100px;flex-shrink:0"],["수량","width:50px;flex-shrink:0"],["색상","width:28px;flex-shrink:0"],["","width:22px;flex-shrink:0"]].forEach(([t,s])=>{
+    const sp=document.createElement("span");sp.textContent=t;sp.style.cssText=s;hdr.appendChild(sp);
+  });
+  // 테이블
+  const tbl=document.createElement("div");tbl.className="ctbl";tbl.id=`ct_${pi}`;
+  sec.append(tr,hdr,tbl);
+  (parts[pi]||[]).forEach((_,ji)=>appendCRow(pi,ji,tbl));
+  return sec;
+}
+function rebuildSec(pi){
+  const tbl=document.getElementById(`ct_${pi}`);if(!tbl)return;
+  tbl.innerHTML="";(parts[pi]||[]).forEach((_,ji)=>appendCRow(pi,ji,tbl));
+  // adj 라벨 갱신
+  const st=_adjGetState(pi);
+  (parts[pi]||[]).forEach((_,ji)=>_adjRefreshLabel(pi,ji,st));
+}
+function appendCRow(pi,ji,tbl){
+  const pt=parts[pi][ji];
+  const row=document.createElement("div");row.className="crow";
+  row.dataset.pi=pi; row.dataset.ji=ji;
+
+  // 이름
+  const n=mkInp("ci","text",pt.name||"","조각명",v=>{parts[pi][ji].name=v;schedCalc();},"name");
+  n.style.flex="1.8";n.style.minWidth="0";
+  n.addEventListener("keydown",e=>cutKey(e,pi,ji,"name"));
+
+  // 길이 — 빈 값은 "" 로 저장 (0 아닌 빈값 보존)
+  const l=mkInp("ci","number",pt.length||"","mm",v=>{
+    parts[pi][ji].length=v===""?"":parseFloat(v)||"";
+    schedCalc();
+  },"length");
+  l.style.width="100px";
+  l.addEventListener("keydown",e=>cutKey(e,pi,ji,"length"));
+  l.addEventListener("blur",()=>{
+    const v=l.value;
+    parts[pi][ji].length=v===""?"":parseFloat(v)||"";
+    // 길이 blur 시엔 데이터 저장만 — validateSize는 폭 입력 완료 후 호출
+  });
+
+  // 폭 — blur 에서 validateSize 호출
+  const w=mkInp("ci","number",pt.width||"","mm",v=>{
+    parts[pi][ji].width=v===""?"":parseFloat(v)||"";
+    schedCalc();
+  },"width");
+  w.style.width="100px";
+  w.addEventListener("keydown",e=>cutKey(e,pi,ji,"width"));
+  w.addEventListener("blur",()=>{
+    if(_validating)return;
+    parts[pi][ji].length=l.value===""?"":parseFloat(l.value)||"";
+    parts[pi][ji].width=w.value===""?"":parseFloat(w.value)||"";
+    // 폭 입력 완료 시 해당 Film 탭 즉시 전환
+    if(parseFloat(parts[pi][ji].length)>0&&pi<panels.length&&pi!==curFilm){
+      curFilm=pi; renderFTabs();
+    }
+    setTimeout(()=>validateSize(pi,ji),200);
+  });
+
+  // 수량
+  const q=mkInp("ci","number",pt.quantity||1,"수량",null,"quantity");
+  q.min="1";q.style.width="50px";
+  q.addEventListener("input",()=>{parts[pi][ji].quantity=Math.max(1,parseInt(q.value)||1);schedCalc();});
+  q.addEventListener("keydown",e=>cutKey(e,pi,ji,"quantity"));
+  q.addEventListener("blur",()=>{
+    if(_validating)return;
+    const nq=Math.max(1,parseInt(q.value)||1);
+    parts[pi][ji].quantity=nq; q.value=nq;
+    schedCalc(); // 수량 blur: 계산만, 포커스 이동 없음
+  });
+
+  // 색상 — Tab 제외
+  const cb=document.createElement("div");cb.className="cbtn";cb.tabIndex=-1;
+  cb.style.cssText=`width:28px;height:28px;flex-shrink:0;background:${pt.color}`;
+  cb.addEventListener("click",()=>{_cTgt={pi,ji};document.getElementById("colorMo").classList.add("on");});
+
+  // 삭제 — Tab 제외
+  const del=mkBtn("delbtn","×",()=>removePart(pi,ji));del.tabIndex=-1;
+
+  row.append(n,l,w,q,cb,del);
+  tbl.appendChild(row);
+
+  // 인라인 힌트 행 (행 바로 아래 표시)
+  const hint=document.createElement("div");
+  hint.className="crow-hint";
+  hint.id=`hint_${pi}_${ji}`;
+  tbl.appendChild(hint);
+  // adj 조정 라벨 행
+  const adjLbl=document.createElement("div");
+  adjLbl.className="adj-label";
+  adjLbl.id=`adjlbl_${pi}_${ji}`;
+  tbl.appendChild(adjLbl);
+}
+
+function addPart(pi){
+  parts[pi].push({name:"",length:"",width:"",quantity:1,color:nc()});
+  rebuildSec(pi);schedCalc();
+  // 새 행 이름 셀로 포커스 — 단, 이미 다른 셀(수량 등)이 포커스를 받은 경우 빼앗지 않음
+  setTimeout(()=>{
+    const t=document.getElementById(`ct_${pi}`);if(!t)return;
+    const rows=t.querySelectorAll(".crow");const last=rows[rows.length-1];if(!last)return;
+    const active=document.activeElement;
+    // 포커스가 이 섹션 내부에 있으면 이동하지 않음
+    if(active&&t.contains(active))return;
+    last.querySelector("input").focus();
+  },50);
+}
+function removePart(pi,ji){
+  if(parts[pi].length<=1){toast("조각은 최소 1개 필요합니다");return;}
+  parts[pi].splice(ji,1);rebuildSec(pi);schedCalc();
+}
+// 마지막 행 길이+폭 모두 입력(blur) 완료 시에만 새 행 자동 추가
+function chkAddPart(pi,ji){
+  if(ji!==parts[pi].length-1)return;
+  const pt=parts[pi][ji];
+  if(parseFloat(pt.length)>0&&parseFloat(pt.width)>0)addPart(pi);
+}
+
+/* ── adj 조정값 ── */
+// _adjState[pi] = {mode:"+"|"-", val:number}
+window._adjState = window._adjState||{};
+
+function _adjGetState(pi){
+  // DOM에서 현재 adj UI 값 읽기
+  const sec=document.getElementById(`cs_${pi}`);if(!sec)return{mode:"+",val:0};
+  const signBtn=sec.querySelector(".adj-sign");
+  const adjInp=sec.querySelector(".adj-inp");
+  const mode=signBtn?signBtn.dataset.mode||"+":"+";
+  const val=adjInp?parseFloat(adjInp.value)||0:0;
+  return{mode,val};
+}
+
+function _adjApply(origL,origW,mode,val){
+  if(mode==="+") return{l:origL+val,w:origW+val};
+  return{l:Math.max(1,origL-val),w:Math.max(1,origW-val)};
+}
+
+function _adjRefresh(pi){
+  // 현재 adj 상태를 _adjState에 저장
+  const st=_adjGetState(pi);
+  window._adjState[pi]=st;
+  // 모든 조각 행의 adj 라벨 갱신
+  (parts[pi]||[]).forEach((_,ji)=>_adjRefreshLabel(pi,ji,st));
+  schedCalc();
+}
+
+function _adjRefreshLabel(pi,ji,st){
+  const lbl=document.getElementById(`adjlbl_${pi}_${ji}`);if(!lbl)return;
+  if(!st)st=_adjGetState(pi);
+  const pt=parts[pi]&&parts[pi][ji];if(!pt)return;
+  const origL=parseFloat(pt.length)||0;
+  const origW=parseFloat(pt.width)||0;
+  if(!origL||!origW||!st.val){lbl.className="adj-label";lbl.textContent="";return;}
+  const{l,w}=_adjApply(origL,origW,st.mode,st.val);
+  const sign=st.mode==="+"?"+":"−";
+  const bg=st.mode==="+"?"#E7F5FF":"#FFF5F5";
+  const fg=st.mode==="+"?"#1864AB":"#C92A2A";
+  lbl.className="adj-label on";
+  lbl.style.background=bg;lbl.style.color=fg;
+  lbl.textContent=`원본 ${origL}×${origW}   →   적용${sign}${st.val}  ${l}×${w}`;
+}
+
+/* ── 힌트 메시지 표시/숨김 ── */
+function setHint(pi,ji,type,msg){
+  const h=document.getElementById(`hint_${pi}_${ji}`);
+  if(!h)return;
+  h.className="crow-hint"+(type?" "+type:"");
+  h.textContent=msg||"";
+}
+function clearHint(pi,ji){setHint(pi,ji,"","");}
+
+/* ── validateSize ── */
+let _validating=false;
+
+function validateSize(pi,ji){
+  if(_validating)return;
+  if(!parts[pi]||!parts[pi][ji])return;
+
+  const l=parseFloat(parts[pi][ji].length);
+  const w=parseFloat(parts[pi][ji].width);
+
+  // 치수 미입력 → 힌트 지우고 수량으로 이동
+  if(!l||!w){ clearHint(pi,ji); moveFocusToQty(pi,ji); return; }
+
+  const panel=panels[pi];
+  if(!panel){ clearHint(pi,ji); moveFocusToQty(pi,ji); return; }
+  const pl=parseFloat(panel.length), pw=parseFloat(panel.width);
+  if(!pl||!pw){ clearHint(pi,ji); moveFocusToQty(pi,ji); return; }
+
+  // ── 1. 크기 초과 검사 ──────────────────────────────────────────
+  // 1a. 원자재 전체보다 큰 경우 → 무조건 차단
+  if(Math.max(l,w)>Math.max(pl,pw) || Math.min(l,w)>Math.min(pl,pw)){
+    setHint(pi,ji,"warn","⚠ 조각이 원자재(Film)보다 큽니다 — 치수를 다시 확인해주세요");
+    _validating=true;
+    showSizeOverModal("조각이 원자재(Film)보다 큽니다!\n치수를 다시 확인해주세요.",()=>{
+      parts[pi][ji].length=""; parts[pi][ji].width="";
+      const t=document.getElementById("ct_"+pi);
+      if(t){
+        const rows=Array.from(t.querySelectorAll(".crow"));
+        if(rows[ji]){
+          const lI=rows[ji].querySelector('input[data-col="length"]');
+          const wI=rows[ji].querySelector('input[data-col="width"]');
+          const nI=rows[ji].querySelector('input[data-col="name"]');
+          if(lI)lI.value=""; if(wI)wI.value=""; clearHint(pi,ji);
+          if(nI){nI.focus();nI.select();}
+        }
+      }
+      _validating=false; schedCalc();
+    });
+    return;
+  }
+
+  // 1b. 현재 잔여 여백보다 큰 경우 → 여백에 맞는 치수는 허용, 아니면 차단
+  {
+    // 이 조각(ji)을 제외한 나머지 조각들로 레이아웃 계산 → 잔여 공간 확인
+    const partsWithout=(parts[pi]||[]).filter((_,idx)=>{
+      if(idx===ji)return false;
+      const pt=parts[pi][idx];
+      return parseFloat(pt.length)>0&&parseFloat(pt.width)>0;
+    });
+    const panelObj={length:pl,width:pw,name:panels[pi].name};
+    const rWithout=bestFit(panelObj,partsWithout,panels[pi].grain);
+    const canFit=rWithout.remaining.some(([,,aw,ah])=>(l<=aw&&w<=ah)||(w<=aw&&l<=ah));
+    if(!canFit){
+      // 입력 가능한 최대 치수 안내
+      let maxFit=null;
+      rWithout.remaining.forEach(([,,aw,ah])=>{if(aw>0&&ah>0&&(!maxFit||aw*ah>maxFit.area))maxFit={l:Math.floor(aw),w:Math.floor(ah),area:aw*ah};});
+      const maxMsg=maxFit?"\n입력 가능한 최대 치수: "+maxFit.l+"×"+maxFit.w+" mm":"";
+      setHint(pi,ji,"warn","⚠ 남은 여백에 배치할 수 없는 치수입니다");
+      _validating=true;
+      showSizeOverModal("남은 원자재 여백에 배치할 수 없는 치수입니다!\n치수를 다시 확인해주세요."+maxMsg,()=>{
+        parts[pi][ji].length=""; parts[pi][ji].width="";
+        const t=document.getElementById("ct_"+pi);
+        if(t){
+          const rows=Array.from(t.querySelectorAll(".crow"));
+          if(rows[ji]){
+            const lI=rows[ji].querySelector('input[data-col="length"]');
+            const wI=rows[ji].querySelector('input[data-col="width"]');
+            const nI=rows[ji].querySelector('input[data-col="name"]');
+            if(lI)lI.value=""; if(wI)wI.value=""; clearHint(pi,ji);
+            if(nI){nI.focus();nI.select();}
+          }
+        }
+        _validating=false; schedCalc();
+      });
+      return;
+    }
+  }
+  // ── 2. 수량 초과 검사 — 즉시 계산
+  clearTimeout(calcT);
+  calcLayout();
+
+  const res=results[pi];
+  if(!res){ clearHint(pi,ji); moveFocusToQty(pi,ji); return; }
+
+  const totalInputQ=parts[pi].reduce((s,p)=>{
+    const pl2=parseFloat(p.length),pw2=parseFloat(p.width),pq=parseInt(p.quantity)||1;
+    return (pl2>0&&pw2>0)?s+pq:s;
+  },0);
+  const placedCount=res.placed.length;
+
+  if(totalInputQ>placedCount){
+    const usedLen=res.placed.length?Math.max(...res.placed.map(p=>p.x+p.length)):0;
+    const remaining=res.panel.length-usedLen;
+    const curQ=parseInt(parts[pi][ji].quantity)||1;
+    const diff=totalInputQ-placedCount;
+
+    // ── Python: adjustable_q = max(1, curQ - diff) ──
+    // max(1, ...) 보정으로 항상 1 이상, 치수는 절대 건드리지 않음
+    const adjustedQ=Math.max(1, curQ-diff);
+
+    let msg=`원자재의 용량이 부족하여 입력하신 조각 ${totalInputQ}개 중 ${placedCount}개만 배치되었습니다.\n치수나 수량을 다시 확인해주세요.`;
+    if(remaining<=0.1) msg="원자재의 잔여 길이가 0m입니다!\n더 이상 조각을 배치할 수 없습니다.";
+
+    // 인라인 힌트 — Python: f"⚠ Warning  {l}×{w}  수량 {diff}개"
+    const ptL=parseFloat(parts[pi][ji].length)||0;
+    const ptW=parseFloat(parts[pi][ji].width)||0;
+    setHint(pi,ji,"warn","⚠ Warning  "+Math.round(ptL)+"×"+Math.round(ptW)+"  수량 "+diff+"개  부족");
+
+    // PC앱: messagebox는 동기 팝업 → 확인 후 vars.set(adjustedQ)
+    // 웹: 비동기 모달이므로, 모달 열기 전에 미리 처리
+    // ① _validating=true로 blur 재진입 차단
+    // ② parts + DOM에 adjustedQ 선반영 (blur가 와도 덮어쓰기 불가)
+    // ③ 모달 표시 → onOk에서 schedCalc + 포커스
+    _validating=true;
+    parts[pi][ji].quantity=adjustedQ;
+    (()=>{
+      const t=document.getElementById("ct_"+pi);
+      if(!t)return;
+      const rows=Array.from(t.querySelectorAll(".crow"));
+      if(rows[ji]){
+        const qI=rows[ji].querySelector('input[data-col="quantity"]');
+        if(qI) qI.value=adjustedQ;
+      }
+    })();
+    showSizeOverModal(msg,()=>{
+      // PC앱: 팝업 확인 후 _generate_layout_actual() 호출
+      schedCalc();
+      _validating=false;
+      // 수량 셀로 포커스 (PC앱은 자동으로 원래 셀로 복귀)
+      setTimeout(()=>moveFocusToQty(pi,ji),0);
+    });
+    return;
+  }
+
+  // ── 3. 정상 — 수량으로 포커스, 마지막 행이면 새 행도 추가
+  clearHint(pi,ji);
+  const wasLast=(ji===parts[pi].length-1);
+  if(wasLast) chkAddPart(pi,ji);
+  // chkAddPart가 새 행 추가 후 name 포커스를 50ms 뒤에 하므로
+  // 수량 포커스는 그보다 먼저 (30ms)
+  setTimeout(()=>moveFocusToQty(pi,ji),30);
+}
+
+function moveFocusToQty(pi,ji){
+  if(_validating)return;
+  const t=document.getElementById("ct_"+pi);if(!t)return;
+  const rows=Array.from(t.querySelectorAll(".crow"));
+  if(ji>=0&&ji<rows.length){
+    const qq=rows[ji].querySelector('input[data-col="quantity"]');
+    if(qq){qq.focus();qq.select();}
+  }
+}
+
+// Size Over 모달
+function showSizeOverModal(msg,onOk){
+  const mo=document.getElementById("soMo");
+  document.getElementById("soMsg").textContent=msg;
+  const okBtn=document.getElementById("soOk");
+
+  function doOk(){
+    mo.classList.remove("on");
+    mo.removeEventListener("keydown",onKey);
+    if(onOk) onOk();
+  }
+  function onKey(e){
+    if(e.key==="Enter"||e.key===" "){e.preventDefault();doOk();}
+  }
+
+  okBtn.onclick=doOk;
+  mo.addEventListener("keydown",onKey);
+  mo.classList.add("on");
+  // 애니메이션(0.2s) 완료 후 포커스 확정
+  setTimeout(()=>{ okBtn.focus(); },220);
+}
+// Enter/Tab/화살표 키: 같은 열의 다음 행으로 이동 (마지막 행이면 다음 열로)
+function cutKey(e,pi,ji,col){
+  const t=document.getElementById(`ct_${pi}`);if(!t)return;
+  const rows=Array.from(t.querySelectorAll(".crow"));
+  const colOrder=["name","length","width","quantity"];
+  const curIdx=colOrder.indexOf(col);
+  // 방향키 처리
+  if(e.key==="ArrowDown"){
+    e.preventDefault();
+    if(ji<rows.length-1){
+      const inp=rows[ji+1].querySelector(`input[data-col="${col}"]`);
+      if(inp){inp.focus();inp.select();}
+    }
+    return;
+  }
+  if(e.key==="ArrowUp"){
+    e.preventDefault();
+    if(ji>0){
+      const inp=rows[ji-1].querySelector(`input[data-col="${col}"]`);
+      if(inp){inp.focus();inp.select();}
+    }
+    return;
+  }
+  if(e.key==="ArrowRight"){
+    e.preventDefault();
+    if(curIdx<colOrder.length-1){
+      const inp=rows[ji].querySelector(`input[data-col="${colOrder[curIdx+1]}"]`);
+      if(inp){inp.focus();inp.select();}
+    }
+    return;
+  }
+  if(e.key==="ArrowLeft"){
+    e.preventDefault();
+    if(curIdx>0){
+      const inp=rows[ji].querySelector(`input[data-col="${colOrder[curIdx-1]}"]`);
+      if(inp){inp.focus();inp.select();}
+    }
+    return;
+  }
+  const isEnter=e.key==="Enter",isTab=e.key==="Tab"&&!e.shiftKey;
+  if(!isEnter&&!isTab)return;
+
+  // 길이 셀 Tab/Enter → 폭으로만 이동 (validateSize 호출 안 함)
+  if(col==="length"&&(isTab||isEnter)){
+    e.preventDefault();
+    const wInp=rows[ji].querySelector('input[data-col="width"]');
+    if(wInp){wInp.focus();wInp.select();}
+    return;
+  }
+
+  // 폭 셀 Enter/Tab → PC앱: validate_size 후 같은 열 다음 행
+  if(col==="width"&&(isTab||isEnter)){
+    e.preventDefault();
+    const wInp=rows[ji].querySelector('input[data-col="width"]');
+    const lInp=rows[ji].querySelector('input[data-col="length"]');
+    if(lInp){const v=lInp.value;parts[pi][ji].length=v===""?"":parseFloat(v)||"";}
+    if(wInp){const v=wInp.value;parts[pi][ji].width=v===""?"":parseFloat(v)||"";}
+    // validateSize가 완료(수량포커스)까지 처리하므로 여기서 다음 행 이동 없음
+    validateSize(pi,ji);
+    return;
+  }
+
+  // Tab/Enter: 수량 → 다음 행 이름으로 이동
+  if(col==="quantity"&&(isTab||isEnter)){
+    e.preventDefault();
+    if(ji<rows.length-1){
+      const inp=rows[ji+1].querySelector('input[data-col="name"]');
+      if(inp){inp.focus();inp.select();}
+    }
+    return;
+  }
+  if(!isEnter)return;
+  e.preventDefault();
+  if(ji<rows.length-1){
+    const inp=rows[ji+1].querySelector(`input[data-col="${col}"]`);
+    if(inp){inp.focus();inp.select();}
+  } else if(curIdx<colOrder.length-1){
+    const inp=rows[ji].querySelector(`input[data-col="${colOrder[curIdx+1]}"]`);
+    if(inp){inp.focus();inp.select();}
+  }
+}
+
+/* === DOM 헬퍼 === */
+function mkInp(cls,type,val,ph,onInput,col){
+  const i=document.createElement("input");i.className=cls;i.type=type;
+  if(val!==undefined&&val!=="")i.value=val;i.placeholder=ph||"";
+  if(col)i.dataset.col=col;
+  if(typeof onInput==="function")i.addEventListener("input",()=>onInput(i.value));
+  return i;
+}
+function mkBtn(cls,txt,onClick){
+  const b=document.createElement("button");b.className=cls;b.textContent=txt;
+  b.addEventListener("click",onClick);return b;
+}
+
+/* === 알고리즘 (PC앱 동일) === */
+function bestFit(panel,pts,noRot=false){
+  const all=[];pts.forEach(p=>{for(let k=0;k<(p.quantity||1);k++)all.push({...p});});
+  all.sort((a,b)=>b.length*b.width-a.length*a.width);
+  const placed=[];let areas=[[0,0,panel.length,panel.width]];
+  all.forEach(pt=>{
+    let bi=-1,bo=null,md=Infinity;
+    areas.forEach(([ax,ay,aw,ah],i)=>{
+      const ors=noRot?[[pt.length,pt.width]]:[[pt.length,pt.width],[pt.width,pt.length]];
+      ors.forEach(([pl,pw])=>{
+        if(pl<=aw&&pw<=ah){const ex=(Math.abs(pl-aw)<.1||Math.abs(pw-ah)<.1);let d=aw*ah-pl*pw;if(ex)d-=1e6;if(d<md){md=d;bi=i;bo=[pl,pw];}}
+      });
+    });
+    if(bi!==-1){
+      const[ax,ay,aw,ah]=areas.splice(bi,1)[0];const[pl,pw]=bo;
+      placed.push({x:ax,y:ay,length:pl,width:pw,color:pt.color,name:pt.name});
+      if(aw-pl>ah-pw){if(aw>pl+.1)areas.push([ax+pl,ay,aw-pl,ah]);if(ah>pw+.1)areas.push([ax,ay+pw,pl,ah-pw]);}
+      else{if(ah>pw+.1)areas.push([ax,ay+pw,aw,ah-pw]);if(aw>pl+.1)areas.push([ax+pl,ay,aw-pl,pw]);}
+      areas.sort((a,b)=>a[2]*a[3]-b[2]*b[3]);
+    }
+  });
+  return{placed,remaining:areas};
+}
+function calcLayout(){
+  results=[];
+  panels.forEach((p,i)=>{
+    if(!parseFloat(p.length)||!parseFloat(p.width))return;
+    const st=_adjGetState(i);
+    const ps=(parts[i]||[]).filter(pt=>parseFloat(pt.length)>0&&parseFloat(pt.width)>0).map(pt=>{
+      if(st.val>0){
+        const{l,w}=_adjApply(parseFloat(pt.length),parseFloat(pt.width),st.mode,st.val);
+        return{...pt,length:l,width:w};
+      }
+      return pt;
+    });
+    let pLen=parseFloat(p.length),pWid=parseFloat(p.width);
+    const fx=flipX[i]||false,fy=flipY[i]||false,tu=turnSt[i]||false;
+    if(fx){const tmp=pLen;pLen=pWid;pWid=tmp;} // Flip X: 가로↔세로 교환
+    const r=bestFit({length:pLen,width:pWid,name:p.name},ps,p.grain);
+    let{placed,remaining}=r;
+    if(fy){ // Flip Y: 상하 반전
+      placed=placed.map(q=>({...q,y:pWid-q.y-q.width}));
+      remaining=remaining.map(([ax,ay,aw,ah])=>[ax,pWid-ay-ah,aw,ah]);
+    }
+    if(tu){ // Turn: 좌우 반전
+      placed=placed.map(q=>({...q,x:pLen-q.x-q.length}));
+      remaining=remaining.map(([ax,ay,aw,ah])=>[pLen-ax-aw,ay,aw,ah]);
+    }
+    results.push({panel:{...p,length:pLen,width:pWid},placed,remaining});
+  });
+  if(curFilm>=results.length)curFilm=Math.max(0,results.length-1);
+
+  // ── Python _generate_layout_actual 루프 대응:
+  // 배치 결과 후 누락 조각 힌트를 패널별로 자동 갱신 (_validating 중에는 skip)
+  if(!_validating){
+    results.forEach((res,i)=>{
+      if(!parts[i])return;
+      // 입력 수량 합계
+      let totalInputQ=0;
+      parts[i].forEach(pt=>{
+        if(parseFloat(pt.length)>0&&parseFloat(pt.width)>0)
+          totalInputQ+=parseInt(pt.quantity)||1;
+      });
+      const placedQ=res.placed.length;
+
+      if(totalInputQ>placedQ){
+        // Python: 누락 조각 식별 — 배치되지 못한 첫 번째 조각 찾기
+        const allP=[];
+        parts[i].forEach((pt,ji)=>{
+          const pl=parseFloat(pt.length),pw=parseFloat(pt.width),pq=parseInt(pt.quantity)||1;
+          if(pl>0&&pw>0){for(let k=0;k<pq;k++)allP.push({l:pl,w:pw,ji});}
+        });
+        const tempPlaced=res.placed.map(p=>({l:p.length,w:p.width}));
+        let missingJi=-1,missingL=0,missingW=0,missingDiff=totalInputQ-placedQ;
+        for(const p of allP){
+          const idx=tempPlaced.findIndex(tp=>(tp.l===p.l&&tp.w===p.w)||(tp.l===p.w&&tp.w===p.l));
+          if(idx!==-1)tempPlaced.splice(idx,1);
+          else{missingJi=p.ji;missingL=p.l;missingW=p.w;break;}
+        }
+        if(missingJi>=0){
+          // Python: f"⚠ Warning  {l}×{w}  수량 {diff}개"
+          setHint(i,missingJi,"warn","⚠ Warning  "+Math.round(missingL)+"×"+Math.round(missingW)+"  수량 "+missingDiff+"개  부족");
+        }
+      } else {
+        // 모두 배치됨 → 힌트 제거 (단, info 힌트는 유지)
+        parts[i].forEach((_,ji)=>{
+          const h=document.getElementById(`hint_${i}_${ji}`);
+          if(h&&h.classList.contains("warn"))clearHint(i,ji);
+        });
+      }
+    });
+  }
+
+  if(!_validating){
+    // 현재 포커스가 있는 조각 섹션(pi)으로 자동 Film 탭 전환
+    const focused=document.activeElement;
+    if(focused){
+      const crow=focused.closest(".crow");
+      if(crow&&crow.dataset.pi!==undefined){
+        const fpi=parseInt(crow.dataset.pi);
+        if(fpi>=0&&fpi<results.length&&fpi!==curFilm){
+          curFilm=fpi;
+        }
+      }
+    }
+    renderFTabs();drawCV();updIB();
+  }
+}
+function schedCalc(){clearTimeout(calcT);calcT=setTimeout(calcLayout,200);schedAutoSave();}
+
+/* === 캔버스 (PC앱 스타일 동일) === */
+const cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+function initCanvas(){
+  resizeCV();window.addEventListener("resize",()=>{resizeCV();drawCV();});
+  let drag=null,pinch=null;
+  cv.addEventListener("mousedown",e=>{drag={x:e.clientX,y:e.clientY};});
+  cv.addEventListener("mousemove",e=>{
+    if(!drag)return;cvX+=e.clientX-drag.x;cvY+=e.clientY-drag.y;drag={x:e.clientX,y:e.clientY};drawCV();
+    // cursor 힌트: 요약 박스 위
+    if(_sumBox){const r=cv.getBoundingClientRect();const mx=e.clientX-r.left,my=e.clientY-r.top;cv.style.cursor=(mx>=_sumBox.bx&&mx<=_sumBox.bx+_sumBox.bw2&&my>=_sumBox.by&&my<=_sumBox.by+_sumBox.bh2)?"pointer":"grabbing";}
+  });
+  cv.addEventListener("click",e=>{
+    if(!_sumBox||!results.length)return;
+    const r=cv.getBoundingClientRect();const mx=e.clientX-r.left,my=e.clientY-r.top;
+    if(mx>=_sumBox.bx&&mx<=_sumBox.bx+_sumBox.bw2&&my>=_sumBox.by&&my<=_sumBox.by+_sumBox.bh2)openSumPopup();
+  });
+  cv.addEventListener("mousemove",e=>{
+    if(_sumBox&&!drag){const r=cv.getBoundingClientRect();const mx=e.clientX-r.left,my=e.clientY-r.top;cv.style.cursor=(mx>=_sumBox.bx&&mx<=_sumBox.bx+_sumBox.bw2&&my>=_sumBox.by&&my<=_sumBox.by+_sumBox.bh2)?"pointer":"grab";}
+  });
+  cv.addEventListener("mouseup",()=>drag=null);
+  cv.addEventListener("wheel",e=>{e.preventDefault();cvS*=e.deltaY<0?1.1:.9;drawCV();},{passive:false});
+  cv.addEventListener("touchstart",e=>{if(e.touches.length===1)drag={x:e.touches[0].clientX,y:e.touches[0].clientY};else if(e.touches.length===2)pinch=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);},{passive:true});
+  cv.addEventListener("touchmove",e=>{if(e.touches.length===1&&drag){cvX+=e.touches[0].clientX-drag.x;cvY+=e.touches[0].clientY-drag.y;drag={x:e.touches[0].clientX,y:e.touches[0].clientY};drawCV();}else if(e.touches.length===2&&pinch){const d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);cvS*=d/pinch;pinch=d;drawCV();}e.preventDefault();},{passive:false});
+  cv.addEventListener("touchend",()=>{drag=null;pinch=null;},{passive:true});
+}
+function resizeCV(){const w=document.getElementById("CW");const cw=w.clientWidth,ch=w.clientHeight;if(cw>0)cv.width=cw;if(ch>0)cv.height=ch;}
+function drawCV(){
+  ctx.clearRect(0,0,cv.width,cv.height);ctx.fillStyle="#F1F3F5";ctx.fillRect(0,0,cv.width,cv.height);
+  if(!results.length){
+    ctx.fillStyle="#ADB5BD";ctx.font="13px 맑은 고딕";ctx.textAlign="center";
+    ctx.fillText("데이터 없음 — 입력 후 자동 계산됩니다",cv.width/2,cv.height/2);return;
+  }
+  // curFilm 범위 보정
+  if(curFilm>=results.length)curFilm=results.length-1;
+  if(curFilm<0)curFilm=0;
+  const res=results[curFilm],panel=res.panel;
+  if(!panel||!panel.length||!panel.width){
+    ctx.fillStyle="#ADB5BD";ctx.font="13px 맑은 고딕";ctx.textAlign="center";
+    ctx.fillText("Film 치수를 입력하세요",cv.width/2,cv.height/2);return;
+  }
+  const pad=40,cw=cv.width,ch=cv.height;
+  const scale=Math.min((cw-pad*2)/panel.length,(ch-pad*2-30)/panel.width)*cvS;
+  const ox=(cw-panel.length*scale)/2+cvX,oy=(ch-panel.width*scale)/2+cvY+15;
+  ctx.fillStyle="#FFF";ctx.strokeStyle="#495057";ctx.lineWidth=1.5;
+  ctx.fillRect(ox,oy,panel.length*scale,panel.width*scale);ctx.strokeRect(ox,oy,panel.length*scale,panel.width*scale);
+  // ── 패널 치수: 치수(mm) + 원자재이름 표시 ──
+  ctx.save();
+  ctx.fillStyle="#495057";ctx.font="bold 13px 맑은 고딕";
+  ctx.textAlign="center";ctx.textBaseline="bottom";
+  // 길이: "치수(mm) 원자재이름"
+  const cvPanelLabel=fdPanel(panel.length)+(panel.name?" "+panel.name:"");
+  ctx.fillText(cvPanelLabel,ox+panel.length*scale/2,oy-2);
+  ctx.textAlign="right";ctx.textBaseline="middle";
+  ctx.fillText(fdPanel(panel.width),ox-4,oy+panel.width*scale/2);
+  ctx.restore();
+
+  // ── 잔여 영역 (빨간 점선 + 치수 표시) ── PC앱 draw_remaining_areas 동일
+  ctx.strokeStyle="#E03131";ctx.lineWidth=1;ctx.setLineDash([4,2]);
+  res.remaining.forEach(([ax,ay,aw,ah])=>{
+    if(aw<2||ah<2)return;
+    const rx=ox+ax*scale,ry=oy+ay*scale,rw=aw*scale,rh=ah*scale;
+    ctx.strokeRect(rx,ry,rw,rh);
+    // 잔여 치수 텍스트 (PC앱 동일: 길이 상단, 폭 좌측)
+    if(rw>35&&rh>22){
+      const rfs=Math.max(8,Math.min(13,Math.floor(Math.min(rw/7,rh/3.5))));
+      ctx.fillStyle="#E03131";ctx.font=rfs+"px 'Courier New'";
+      ctx.textAlign="center";
+      ctx.fillText(Math.round(aw),rx+rw/2,ry+rfs+2);
+      ctx.textAlign="left";
+      ctx.fillText(Math.round(ah),rx+3,ry+rh/2+rfs*.35);
+    }
+  });
+  ctx.setLineDash([]);
+
+  // ── 조각: 이름+치수 겹침 자동 회피 ──
+  const cvUsed=[];
+  function _cvRov(ax,ay,aw,ah,bx,by,bw2,bh2){return Math.abs(ax-bx)<(aw+bw2)*0.5&&Math.abs(ay-by)<(ah+bh2)*0.5;}
+  function cvFindPos(x1,y1,x2,y2,isLen,fsd,sc2){
+    const txt=String(Math.round(isLen?(x2-x1)/sc2:(y2-y1)/sc2));
+    const hw=fsd*txt.length*0.32+2,hh=fsd*0.7+2;
+    const mg=2;
+    const minX=x1+hw+mg,maxX=x2-hw-mg,minY=y1+hh+mg,maxY=y2-hh-mg;
+    if(minX>maxX||minY>maxY)return[Math.max(minX,Math.min(maxX,(x1+x2)/2)),Math.max(minY,Math.min(maxY,(y1+y2)/2)),hw,hh];
+    let cands=isLen?[[(x1+x2)/2,y1+mg+hh],[(x1+x2)/2,y2-mg-hh],[(x1+x2)/2,(y1+y2)/2]]
+                   :[[x1+mg+hw,(y1+y2)/2],[x2-mg-hw,(y1+y2)/2],[(x1+x2)/2,(y1+y2)/2]];
+    const steps=6;
+    for(let si=0;si<steps;si++){const t=si/(steps-1);
+      if(isLen)cands.push([(x1+x2)/2,y1+hh+mg+(y2-y1-2*hh-2*mg)*t]);
+      else cands.push([x1+hw+mg+(x2-x1-2*hw-2*mg)*t,(y1+y2)/2]);}
+    let best=null,bestOv=Infinity;
+    for(let[cx,cy] of cands){
+      cx=Math.max(minX,Math.min(maxX,cx));cy=Math.max(minY,Math.min(maxY,cy));
+      const ov=cvUsed.reduce((s,[rx,ry,rw,rh])=>s+(_cvRov(cx,cy,hw,hh,rx,ry,rw,rh)?1:0),0);
+      if(ov===0){best=[cx,cy];break;}if(ov<bestOv){bestOv=ov;best=[cx,cy];}
+    }
+    const[cx,cy]=best||[(x1+x2)/2,(y1+y2)/2];
+    return[Math.max(minX,Math.min(maxX,cx)),Math.max(minY,Math.min(maxY,cy)),hw,hh];
+  }
+  res.placed.forEach(p=>{
+    const x1=ox+p.x*scale,y1=oy+p.y*scale,bw=p.length*scale,bh=p.width*scale;
+    ctx.fillStyle=p.color;ctx.strokeStyle="#444";ctx.lineWidth=.8;
+    ctx.fillRect(x1,y1,bw,bh);ctx.strokeRect(x1,y1,bw,bh);
+    if(bw>22&&bh>15){
+      const tc=cc(p.color);
+      const fs=Math.max(7,Math.min(15,Math.floor(Math.min(bw/5,bh/2.5))));
+      const fsS=Math.max(6,fs-2);
+      // 이름 — 여백 따라 한줄/두줄 자동 선택
+      {
+        const cvFS=Math.max(7,Math.min(fs,Math.floor(Math.min(bw/5,bh/2.5))));
+        const {twoLine,line1,line2}=partLabelLines(panel.name,p.name,bw,bh,cvFS);
+        const cx_=(x1+x1+bw)/2;
+        if(twoLine&&line1&&line2&&bh>cvFS*2.8){
+          // 두 줄: 원자재이름 위, (조각이름) 아래
+          const fs1=Math.max(7,Math.min(cvFS,Math.floor(bw/(line1.length*0.65+1))));
+          const fs2=Math.max(6,Math.min(cvFS-1,Math.floor(bw/(line2.length*0.65+1))));
+          const cy_=(y1+y1+bh)/2;
+          const ny1=Math.max(y1+fs1+1,Math.min(cy_,cy_-fs2*0.6));
+          const ny2=Math.max(ny1+fs1*0.5,Math.min(y1+bh-2,cy_+fs2*0.8));
+          ctx.fillStyle=tc;ctx.textAlign="center";
+          ctx.font="bold "+fs1+"px 맑은 고딕";ctx.fillText(line1,cx_,ny1);
+          ctx.font="bold "+fs2+"px 맑은 고딕";ctx.fillText(line2,cx_,ny2);
+          cvUsed.push([cx_,(ny1+ny2)/2,Math.max(fs1*line1.length*0.55,fs2*line2.length*0.55)+2,(ny2-ny1+fs2)]);
+        } else if(line1){
+          const single=line1; // twoLine=false이면 line1=single
+          const dispFS=Math.max(7,Math.min(cvFS,Math.floor(Math.min(bw/(single.length*0.6+1),bh/2.5))));
+          const nw=dispFS*single.length*0.55+2,nh=dispFS;
+          const nx=Math.max(x1+nw/2+1,Math.min(x1+bw-nw/2-1,cx_));
+          const ny=Math.max(y1+nh+1,Math.min(y1+bh-2,(y1+y1+bh)/2+dispFS*.35));
+          ctx.fillStyle=tc;ctx.font="bold "+dispFS+"px 맑은 고딕";ctx.textAlign="center";
+          ctx.fillText(single,nx,ny);
+          cvUsed.push([nx,ny-nh*0.5,nw,nh]);
+        }
+      }
+      // 길이 치수 — 내부, 겹침 회피
+      if(bw>28&&bh>20){
+        const[cx,cy,hw,hh]=cvFindPos(x1,y1,x1+bw,y1+bh,true,fsS,scale);
+        ctx.fillStyle=tc;ctx.font=fsS+"px 'Courier New'";ctx.textAlign="center";
+        ctx.fillText(Math.round(p.length),cx,cy+fsS*0.35);
+        cvUsed.push([cx,cy,hw,hh]);
+      }
+      // 폭 치수 — 내부, 겹침 회피
+      if(bh>20&&bw>35){
+        const[cx,cy,hw,hh]=cvFindPos(x1,y1,x1+bw,y1+bh,false,fsS,scale);
+        ctx.fillStyle=tc;ctx.font=fsS+"px 'Courier New'";ctx.textAlign="center";
+        ctx.fillText(Math.round(p.width),cx,cy+fsS*0.35);
+        cvUsed.push([cx,cy,hw,hh]);
+      }
+    }
+  });
+  const usedLen=res.placed.length?Math.max(...res.placed.map(p=>p.x+p.length)):0,remLen=Math.max(0,panel.length-usedLen);
+  const bx=cw-148,by=ch-92,bw2=138,bh2=82;
+  _sumBox={bx,by,bw2,bh2};
+  ctx.fillStyle="rgba(30,33,48,.9)";ctx.strokeStyle="#2E3448";ctx.lineWidth=1;ctx.fillRect(bx,by,bw2,bh2);ctx.strokeRect(bx,by,bw2,bh2);
+  ctx.fillStyle="#9BA3B2";ctx.font="9px 'Courier New'";ctx.textAlign="left";
+  [`총길이: ${fd(panel.length/1000)}m`,`총폭: ${fd(panel.width/1000)}m`,`사용: ${fd(usedLen/1000)}m`,`잔여: ${fd(remLen/1000)}m`,`조각: ${res.placed.length}개`].forEach((l,i)=>ctx.fillText(l,bx+7,by+13+i*14));
+  // 클릭 힌트
+  ctx.fillStyle="rgba(255,255,255,0.28)";ctx.font="8px 'Courier New'";ctx.textAlign="center";
+  ctx.fillText("▶ 클릭하면 상세 보기",bx+bw2/2,by+bh2-4);
+}
+function renderFTabs(){
+  const w=document.getElementById("filmTabs");w.innerHTML="";
+  results.forEach((r,i)=>{
+    const b=document.createElement("button");b.className="ftab"+(i===curFilm?" on":"");b.textContent=r.panel.name||"Film"+(i+1);
+    b.addEventListener("click",()=>{curFilm=i;cvS=1;cvX=0;cvY=0;renderFTabs();_updFlipBtns();drawCV();});w.appendChild(b);
+  });
+}
+function zoom(f){cvS*=f;drawCV();}function resetZoom(){cvS=1;cvX=0;cvY=0;drawCV();}
+
+function doTurn(){
+  if(curFilm<0||curFilm>=panels.length)return;
+  while(turnSt.length<=curFilm)turnSt.push(false);
+  turnSt[curFilm]=!turnSt[curFilm];
+  _updFlipBtns();schedCalc();
+}
+function doFlip(axis){
+  if(curFilm<0||curFilm>=panels.length)return;
+  while(flipX.length<=curFilm)flipX.push(false);
+  while(flipY.length<=curFilm)flipY.push(false);
+  if(axis==="x")flipX[curFilm]=!flipX[curFilm];
+  else           flipY[curFilm]=!flipY[curFilm];
+  _updFlipBtns();schedCalc();
+}
+function _updFlipBtns(){
+  const i=curFilm;
+  const bt=document.getElementById("btnTurn");
+  const bx=document.getElementById("btnFlipX");
+  const by=document.getElementById("btnFlipY");
+  if(bt){bt.style.background=(turnSt[i])?"var(--bb)":"var(--cv)";bt.style.color=(turnSt[i])?"#fff":"var(--tx)";}
+  if(bx){bx.style.background=(flipX[i])?"var(--bb)":"var(--cv)";bx.style.color=(flipX[i])?"#fff":"var(--tx)";}
+  if(by){by.style.background=(flipY[i])?"var(--bb)":"var(--cv)";by.style.color=(flipY[i])?"#fff":"var(--tx)";}
+}
+
+/* === 정보바 === */
+function updIB(){
+  const bar=document.getElementById("IB");bar.innerHTML="";
+  results.forEach((r,i)=>{
+    const u=r.placed.length?Math.max(...r.placed.map(p=>p.x+p.length)):0,rm=Math.max(0,r.panel.length-u);
+    const b=document.createElement("div");b.className="ibox";
+    b.innerHTML=`<span class="ibn">${i+1}. ${esc(r.panel.name||"Film")}</span><span class="ibv">잔여: ${fd(rm/1000)}m</span><span class="ibv">조각: ${r.placed.length}개</span>`;
+    bar.appendChild(b);
+  });
+}
+
+/* === 요약 팝업 === */
+function openSumPopup(focusFilm){
+  if(!results.length)return;
+  const hi=focusFilm!==undefined?focusFilm:curFilm;
+  let html="";
+  results.forEach((r,i)=>{
+    const u=r.placed.length?Math.max(...r.placed.map(p=>p.x+p.length)):0;
+    const rm=Math.max(0,r.panel.length-u),ratio=r.panel.length?(u/r.panel.length*100).toFixed(1):0;
+    html+=`<div style="background:var(--cv);border:1px solid var(--ln);border-radius:6px;padding:10px;margin-bottom:8px${i===hi?";border-color:var(--ac);border-width:2px":""}">
+      <div style="font-size:12px;font-weight:700;color:var(--hd);margin-bottom:6px">${i+1}. ${esc(r.panel.name||"Film")}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:11px;margin-bottom:6px">
+        <div><span style="color:#868E96">총길이 </span><b>${fd(r.panel.length/1000)}m</b></div>
+        <div><span style="color:#868E96">총폭 </span><b>${fd(r.panel.width/1000)}m</b></div>
+        <div><span style="color:#868E96">사용 </span><b style="color:var(--ac)">${fd(u/1000)}m</b></div>
+        <div><span style="color:#868E96">잔여 </span><b style="color:var(--sc)">${fd(rm/1000)}m</b></div>
+        <div><span style="color:#868E96">조각 </span><b>${r.placed.length}개</b></div>
+        <div><span style="color:#868E96">사용률 </span><b>${ratio}%</b></div>
+      </div>
+      <div style="background:var(--ln);border-radius:3px;height:4px;overflow:hidden"><div style="height:100%;background:linear-gradient(90deg,#343A40,#339AF0);width:${ratio}%"></div></div>
+    </div>`;
+  });
+  document.getElementById("sumC").innerHTML=html;
+  document.getElementById("sumMo").classList.add("on");
+}
+
+/* === Full 보기 === */
+const fcv=document.getElementById("fullCv"),fctx=fcv.getContext("2d");
+function openFull(idx){
+  if(!results.length){toast("먼저 배치 계산이 필요합니다");return;}
+  fF=idx!==undefined?idx:curFilm;
+  document.getElementById("fullMo").classList.add("on");
+  const ft=document.getElementById("fullTabs");ft.innerHTML="";
+  results.forEach((r,i)=>{const b=document.createElement("button");b.className="ftab"+(i===fF?" on":"");b.textContent=r.panel.name||"Film"+(i+1);b.addEventListener("click",()=>{fF=i;document.querySelectorAll("#fullTabs .ftab").forEach((t,j)=>t.classList.toggle("on",j===i));_updFullFlipBtns();drawFull();});ft.appendChild(b);});
+  setTimeout(()=>{fcv.width=fcv.offsetWidth;fcv.height=fcv.offsetHeight;_updFullFlipBtns();fresetZoom();},60);
+  let fd2=null,fPinch=null;
+  fcv.onmousedown=e=>{fd2={x:e.clientX,y:e.clientY};};
+  fcv.onmousemove=e=>{
+    if(fd2){fX+=e.clientX-fd2.x;fY+=e.clientY-fd2.y;fd2={x:e.clientX,y:e.clientY};drawFull();fcv.style.cursor="grabbing";return;}
+    // cursor 힌트: 요약 박스 위
+    if(_fSumBox){const r=fcv.getBoundingClientRect();const mx=e.clientX-r.left,my=e.clientY-r.top;fcv.style.cursor=(mx>=_fSumBox.bx&&mx<=_fSumBox.bx+_fSumBox.bw2&&my>=_fSumBox.by&&my<=_fSumBox.by+_fSumBox.bh2)?"pointer":"grab";}
+  };
+  fcv.onmouseup=()=>{fd2=null;fcv.style.cursor="grab";};
+  fcv.onclick=e=>{
+    if(!_fSumBox||!results.length)return;
+    const r=fcv.getBoundingClientRect();const mx=e.clientX-r.left,my=e.clientY-r.top;
+    if(mx>=_fSumBox.bx&&mx<=_fSumBox.bx+_fSumBox.bw2&&my>=_fSumBox.by&&my<=_fSumBox.by+_fSumBox.bh2)openSumPopup(fF);
+  };
+  fcv.onwheel=e=>{e.preventDefault();fS*=e.deltaY<0?1.1:.9;drawFull();};
+  // 터치 드래그 / 핀치줌 (passive:false 필요 → addEventListener)
+  if(!fcv._touchBound){
+    fcv._touchBound=true;
+    fcv.addEventListener("touchstart",e=>{if(e.touches.length===1){fd2={x:e.touches[0].clientX,y:e.touches[0].clientY};}else if(e.touches.length===2){fPinch=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);}},{passive:true});
+    fcv.addEventListener("touchmove",e=>{e.preventDefault();if(e.touches.length===1&&fd2){fX+=e.touches[0].clientX-fd2.x;fY+=e.touches[0].clientY-fd2.y;fd2={x:e.touches[0].clientX,y:e.touches[0].clientY};drawFull();}else if(e.touches.length===2&&fPinch){const d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);fS*=d/fPinch;fPinch=d;drawFull();}},{passive:false});
+    fcv.addEventListener("touchend",e=>{if(e.touches.length===0){fd2=null;fPinch=null;}},{passive:true});
+  }
+}
+function drawFull(){
+  fctx.clearRect(0,0,fcv.width,fcv.height);fctx.fillStyle="#F1F3F5";fctx.fillRect(0,0,fcv.width,fcv.height);
+  if(!results.length||fF>=results.length)return;
+  const res=results[fF],panel=res.panel,pad=60;
+  const scale=Math.min((fcv.width-pad*2)/panel.length,(fcv.height-pad*2)/panel.width)*fS;
+  const ox=(fcv.width-panel.length*scale)/2+fX,oy=(fcv.height-panel.width*scale)/2+fY;
+  // 패널 배경
+  fctx.fillStyle=lineMode?"#FAFAFA":"#FFF";fctx.strokeStyle="#495057";fctx.lineWidth=1.5;
+  fctx.fillRect(ox,oy,panel.length*scale,panel.width*scale);fctx.strokeRect(ox,oy,panel.length*scale,panel.width*scale);
+  fctx.save();
+  fctx.fillStyle="#495057";fctx.font="bold 14px 맑은 고딕";
+  fctx.textAlign="center";fctx.textBaseline="bottom";
+  // 길이: "치수(mm) 원자재이름"
+  const fullPanelLabel=fdPanel(panel.length)+(panel.name?" "+panel.name:"");
+  fctx.fillText(fullPanelLabel,ox+panel.length*scale/2,oy-2);
+  fctx.textAlign="right";fctx.textBaseline="middle";
+  fctx.fillText(fdPanel(panel.width),ox-6,oy+panel.width*scale/2);
+  fctx.restore();
+  // 잔여 영역 + 치수 표시 (PC앱 draw_remaining_areas 동일)
+  if(!lineMode){
+    fctx.strokeStyle="#E03131";fctx.lineWidth=1;fctx.setLineDash([4,2]);
+    res.remaining.forEach(([ax,ay,aw,ah])=>{
+      if(aw<2||ah<2)return;
+      const rx=ox+ax*scale,ry=oy+ay*scale,rw=aw*scale,rh=ah*scale;
+      fctx.strokeRect(rx,ry,rw,rh);
+      if(rw>40&&rh>25){
+        const rfs=Math.max(9,Math.min(15,Math.floor(Math.min(rw/7,rh/3.5))));
+        fctx.fillStyle="#E03131";fctx.font=rfs+"px 'Courier New'";
+        fctx.textAlign="center";fctx.fillText(Math.round(aw),rx+rw/2,ry+rfs+2);
+        fctx.textAlign="left";fctx.fillText(Math.round(ah),rx+3,ry+rh/2+rfs*.35);
+      }
+    });
+    fctx.setLineDash([]);
+  }
+  // 조각 렌더
+  res.placed.forEach(p=>{
+    const x1=ox+p.x*scale,y1=oy+p.y*scale,bw=p.length*scale,bh=p.width*scale;
+    if(lineMode){
+      // Line Mode: 윤곽선만, 배경 흰색 반투명, 치수+이름 텍스트 강조
+      fctx.fillStyle="rgba(255,255,255,0.6)";fctx.fillRect(x1,y1,bw,bh);
+      fctx.strokeStyle=p.color;fctx.lineWidth=1.8;fctx.strokeRect(x1,y1,bw,bh);
+      if(bw>20&&bh>14){
+        const fs=Math.max(7,Math.min(15,Math.floor(Math.min(bw/5,bh/3))));
+        fctx.fillStyle=p.color;fctx.textAlign="center";
+        {
+          const flFS=Math.max(7,Math.min(fs,Math.floor(Math.min(bw/5,bh/3))));
+          const {twoLine:flTL,line1:flL1,line2:flL2}=partLabelLines(panel.name,p.name,bw,bh,flFS);
+          if(flTL&&flL1&&flL2&&bh>flFS*2.8){
+            const ffs1=Math.max(7,Math.min(flFS,Math.floor(bw/(flL1.length*0.65+1))));
+            const ffs2=Math.max(6,Math.min(flFS-1,Math.floor(bw/(flL2.length*0.65+1))));
+            fctx.font=`bold ${ffs1}px 맑은 고딕`;fctx.fillText(flL1,x1+bw/2,y1+bh/2-ffs2*0.3);
+            fctx.font=`bold ${ffs2}px 맑은 고딕`;fctx.fillText(flL2,x1+bw/2,y1+bh/2+ffs1*0.8);
+          } else if(flL1){
+            const dispFS=Math.max(7,Math.min(flFS,Math.floor(Math.min(bw/(flL1.length*0.6+1),bh/3))));
+            fctx.font=`bold ${dispFS}px 맑은 고딕`;fctx.fillText(flL1,x1+bw/2,y1+bh/2+dispFS*.35);
+          }
+        }
+        if(bh>32){fctx.font=Math.max(6,fs-2)+"px 'Courier New'";fctx.fillText(Math.round(p.length)+"×"+Math.round(p.width),x1+bw/2,y1+bh/2-fs*.8);}
+      }
+    } else {
+      // Normal Mode: 채우기 + 윤곽선 + 텍스트 (겹침 자동회피)
+      fctx.fillStyle=p.color;fctx.strokeStyle="#444";fctx.lineWidth=.8;
+      fctx.fillRect(x1,y1,bw,bh);fctx.strokeRect(x1,y1,bw,bh);
+      if(bw>22&&bh>15){
+        const tc=cc(p.color);
+        const fs=Math.max(8,Math.min(16,Math.floor(Math.min(bw/5,bh/2.5))));
+        const fsS=Math.max(7,fs-2);
+        const fullLabel=partLabel(panel.name,p.name);
+        const fUsed=[];
+        function _fRov(ax,ay,aw,ah,bx2,by2,bw3,bh3){return Math.abs(ax-bx2)<(aw+bw3)*0.5&&Math.abs(ay-by2)<(ah+bh3)*0.5;}
+        function fFindPos(lx1,ly1,lx2,ly2,isLen,fsd){
+          const txt=String(Math.round(isLen?(lx2-lx1)/scale:(ly2-ly1)/scale));
+          const hw=fsd*txt.length*0.32+2,hh=fsd*0.7+2;
+          const mg=2,minX=lx1+hw+mg,maxX=lx2-hw-mg,minY=ly1+hh+mg,maxY=ly2-hh-mg;
+          if(minX>maxX||minY>maxY)return[(lx1+lx2)/2,(ly1+ly2)/2,hw,hh];
+          let cands=isLen?[[(lx1+lx2)/2,ly1+mg+hh],[(lx1+lx2)/2,ly2-mg-hh],[(lx1+lx2)/2,(ly1+ly2)/2]]
+                        :[[ lx1+mg+hw,(ly1+ly2)/2],[lx2-mg-hw,(ly1+ly2)/2],[(lx1+lx2)/2,(ly1+ly2)/2]];
+          let best=null,bestOv=Infinity;
+          for(let[cx,cy] of cands){
+            cx=Math.max(minX,Math.min(maxX,cx));cy=Math.max(minY,Math.min(maxY,cy));
+            const ov=fUsed.reduce((s,[rx,ry,rw,rh])=>s+(_fRov(cx,cy,hw,hh,rx,ry,rw,rh)?1:0),0);
+            if(ov===0){best=[cx,cy];break;}if(ov<bestOv){bestOv=ov;best=[cx,cy];}
+          }
+          const[cx,cy]=best||[(lx1+lx2)/2,(ly1+ly2)/2];
+          return[Math.max(minX,Math.min(maxX,cx)),Math.max(minY,Math.min(maxY,cy)),hw,hh];
+        }
+        // 이름 — 여백 따라 한줄/두줄
+        {
+          const fFS=Math.max(7,Math.min(fs,Math.floor(Math.min(bw/5,bh/2.5))));
+          const {twoLine:fTL,line1:fL1,line2:fL2}=partLabelLines(panel.name,p.name,bw,bh,fFS);
+          const fcx_=(x1+x1+bw)/2;
+          if(fTL&&fL1&&fL2&&bh>fFS*2.8){
+            const ffs1=Math.max(7,Math.min(fFS,Math.floor(bw/(fL1.length*0.65+1))));
+            const ffs2=Math.max(6,Math.min(fFS-1,Math.floor(bw/(fL2.length*0.65+1))));
+            const fcy_=(y1+y1+bh)/2;
+            const fny1=Math.max(y1+ffs1+1,Math.min(fcy_,fcy_-ffs2*0.6));
+            const fny2=Math.max(fny1+ffs1*0.5,Math.min(y1+bh-2,fcy_+ffs2*0.8));
+            fctx.fillStyle=tc;fctx.textAlign="center";
+            fctx.font="bold "+ffs1+"px 맑은 고딕";fctx.fillText(fL1,fcx_,fny1);
+            fctx.font="bold "+ffs2+"px 맑은 고딕";fctx.fillText(fL2,fcx_,fny2);
+            fUsed.push([fcx_,(fny1+fny2)/2,Math.max(ffs1*fL1.length*0.55,ffs2*fL2.length*0.55)+2,(fny2-fny1+ffs2)]);
+          } else if(fL1){
+            const dispFS=Math.max(7,Math.min(fFS,Math.floor(Math.min(bw/(fL1.length*0.6+1),bh/2.5))));
+            const nw=dispFS*fL1.length*0.55+2,nh=dispFS;
+            const nx=Math.max(x1+nw/2+1,Math.min(x1+bw-nw/2-1,fcx_));
+            const ny=Math.max(y1+nh+1,Math.min(y1+bh-2,(y1+y1+bh)/2+dispFS*.35));
+            fctx.fillStyle=tc;fctx.font="bold "+dispFS+"px 맑은 고딕";fctx.textAlign="center";
+            fctx.fillText(fL1,nx,ny);
+            fUsed.push([nx,ny-nh*0.5,nw,nh]);
+          }
+        }
+        if(bh>30){const[cx,cy,hw,hh]=fFindPos(x1,y1,x1+bw,y1+bh,true,fsS);fctx.font=fsS+"px 'Courier New'";fctx.fillStyle=tc;fctx.textAlign="center";fctx.fillText(Math.round(p.length),cx,cy+fsS*0.35);fUsed.push([cx,cy,hw,hh]);}
+        if(bw>50){const[cx,cy,hw,hh]=fFindPos(x1,y1,x1+bw,y1+bh,false,fsS);fctx.font=fsS+"px 'Courier New'";fctx.fillStyle=tc;fctx.textAlign="center";fctx.fillText(Math.round(p.width),cx,cy+fsS*0.35);fUsed.push([cx,cy,hw,hh]);}
+      }
+    }
+  });
+  // Line Mode: 절단선 강조 (가로/세로 모서리 연장선)
+  if(lineMode){
+    fctx.save();
+    fctx.strokeStyle="rgba(52,58,64,0.18)";fctx.lineWidth=.6;fctx.setLineDash([3,4]);
+    res.placed.forEach(p=>{
+      const x1=ox+p.x*scale,y1=oy+p.y*scale,bw=p.length*scale,bh=p.width*scale;
+      // 세로 절단선
+      [x1,x1+bw].forEach(x=>{if(x>ox+1&&x<ox+panel.length*scale-1){fctx.beginPath();fctx.moveTo(x,oy);fctx.lineTo(x,oy+panel.width*scale);fctx.stroke();}});
+      // 가로 절단선
+      [y1,y1+bh].forEach(y=>{if(y>oy+1&&y<oy+panel.width*scale-1){fctx.beginPath();fctx.moveTo(ox,y);fctx.lineTo(ox+panel.length*scale,y);fctx.stroke();}});
+    });
+    fctx.setLineDash([]);fctx.restore();
+  }
+  // Grid Mode: 격자선 오버레이
+  if(gridMode){
+    fctx.save();
+    // 적절한 그리드 간격 계산 (100~500mm 단위, 화면에 5~20칸 나오도록)
+    const targets=[50,100,200,250,500,1000];
+    let gStep=targets[0];
+    for(const t of targets){if(panel.length*scale/t*1000>4&&panel.length*scale/t*1000<30){gStep=t;break;}}
+    const gPx=gStep*scale/1000*1000; // mm→px: scale은 px/mm 단위
+    // 실제 scale은 px/mm이므로 gPx = gStep(mm) * scale(px/mm)
+    const gridPx=gStep*scale;
+    fctx.strokeStyle="rgba(100,120,180,0.20)";fctx.lineWidth=.6;fctx.setLineDash([]);
+    // 세로선
+    for(let x=ox;x<=ox+panel.length*scale+.5;x+=gridPx){
+      fctx.beginPath();fctx.moveTo(x,oy);fctx.lineTo(x,oy+panel.width*scale);fctx.stroke();
+    }
+    // 가로선
+    for(let y=oy;y<=oy+panel.width*scale+.5;y+=gridPx){
+      fctx.beginPath();fctx.moveTo(ox,y);fctx.lineTo(ox+panel.length*scale,y);fctx.stroke();
+    }
+    // 눈금 라벨
+    fctx.fillStyle="rgba(100,120,180,0.55)";fctx.font="8px 'Courier New'";fctx.textAlign="center";
+    let xi=0;for(let x=ox;x<=ox+panel.length*scale+.5;x+=gridPx,xi++){
+      if(xi===0)continue;
+      fctx.fillText((gStep*xi)+"",x,oy-3);
+    }
+    fctx.textAlign="right";
+    let yi=0;for(let y=oy;y<=oy+panel.width*scale+.5;y+=gridPx,yi++){
+      if(yi===0)continue;
+      fctx.fillText((gStep*yi)+"",ox-3,y+3);
+    }
+    fctx.restore();
+  }
+  // 정보박스 (fcv 기준 — Full 모달 캔버스 크기 사용)
+  const usedLen=res.placed.length?Math.max(...res.placed.map(p=>p.x+p.length)):0,remLen=Math.max(0,panel.length-usedLen);
+  const fbx=fcv.width-148,fby=fcv.height-92,fbw2=138,fbh2=82;
+  _fSumBox={bx:fbx,by:fby,bw2:fbw2,bh2:fbh2};
+  fctx.fillStyle="rgba(30,33,48,.9)";fctx.strokeStyle="#2E3448";fctx.lineWidth=1;fctx.fillRect(fbx,fby,fbw2,fbh2);fctx.strokeRect(fbx,fby,fbw2,fbh2);
+  fctx.fillStyle="#9BA3B2";fctx.font="9px 'Courier New'";fctx.textAlign="left";
+  [`총길이: ${fd(panel.length/1000)}m`,`총폭: ${fd(panel.width/1000)}m`,`사용: ${fd(usedLen/1000)}m`,`잔여: ${fd(remLen/1000)}m`,`조각: ${res.placed.length}개`].forEach((l,i)=>fctx.fillText(l,fbx+7,fby+13+i*14));
+  // 클릭 힌트
+  fctx.fillStyle="rgba(255,255,255,0.28)";fctx.font="8px 'Courier New'";fctx.textAlign="center";
+  fctx.fillText("▶ 클릭하면 상세 보기",fbx+fbw2/2,fby+fbh2-4);
+}
+function fzoom(f){fS*=f;drawFull();}function fresetZoom(){fS=1;fX=0;fY=0;drawFull();}
+
+// ── Full 보기 Turn/Flip ──────────────────────────────────────
+function doTurnF(){
+  while(turnSt.length<=fF)turnSt.push(false);
+  turnSt[fF]=!turnSt[fF];
+  _updFullFlipBtns();if(fF===curFilm)_updFlipBtns();
+  schedCalc();setTimeout(()=>drawFull(),220);
+}
+function doFlipF(axis){
+  while(flipX.length<=fF)flipX.push(false);
+  while(flipY.length<=fF)flipY.push(false);
+  if(axis==="x")flipX[fF]=!flipX[fF];else flipY[fF]=!flipY[fF];
+  _updFullFlipBtns();if(fF===curFilm)_updFlipBtns();
+  schedCalc();setTimeout(()=>drawFull(),220);
+}
+function _updFullFlipBtns(){
+  const i=fF;
+  const bt=document.getElementById("fBtnTurn");
+  const bx=document.getElementById("fBtnFlipX");
+  const by=document.getElementById("fBtnFlipY");
+  if(bt){bt.style.background=(turnSt[i])?"var(--bb)":"var(--cv)";bt.style.color=(turnSt[i])?"#fff":"var(--tx)";}
+  if(bx){bx.style.background=(flipX[i])?"var(--bb)":"var(--cv)";bx.style.color=(flipX[i])?"#fff":"var(--tx)";}
+  if(by){by.style.background=(flipY[i])?"var(--bb)":"var(--cv)";by.style.color=(flipY[i])?"#fff":"var(--tx)";}
+}
+
+// ── Line Mode Turn/Flip ──────────────────────────────────────
+function lmDoTurn(){
+  const i=lmFilmIdx;
+  while(turnSt.length<=i)turnSt.push(false);
+  turnSt[i]=!turnSt[i];
+  _updLmFlipBtns();schedCalc();setTimeout(()=>lmDraw(),220);
+}
+function lmDoFlip(axis){
+  const i=lmFilmIdx;
+  while(flipX.length<=i)flipX.push(false);
+  while(flipY.length<=i)flipY.push(false);
+  if(axis==="x")flipX[i]=!flipX[i];else flipY[i]=!flipY[i];
+  _updLmFlipBtns();schedCalc();setTimeout(()=>lmDraw(),220);
+}
+function _updLmFlipBtns(){
+  const i=lmFilmIdx;
+  const bt=document.getElementById("lmBtnTurn");
+  const bx=document.getElementById("lmBtnFlipX");
+  const by=document.getElementById("lmBtnFlipY");
+  if(bt){bt.style.background=(turnSt[i])?"#1D4ED8":"#252830";bt.style.color=(turnSt[i])?"#fff":"#ADB5BD";}
+  if(bx){bx.style.background=(flipX[i])?"#1D4ED8":"#252830";bx.style.color=(flipX[i])?"#fff":"#ADB5BD";}
+  if(by){by.style.background=(flipY[i])?"#1D4ED8":"#252830";by.style.color=(flipY[i])?"#fff":"#ADB5BD";}
+}
+
+// ── Line Mode 제어판 가로/세로 토글 ─────────────────────────
+// PC앱과 동일: 섹션들을 2열 grid로 재배치
+let lmLayoutH=false;
+function lmToggleLayout(e){
+  if(e)e.stopPropagation();
+  lmLayoutH=!lmLayoutH;
+  const ctrl=document.getElementById("lmCtrl");
+  const body=document.getElementById("lmCtrlBody");
+  const btn=document.getElementById("lmLayoutBtn");
+  if(!ctrl||!body)return;
+  if(lmLayoutH){
+    // 가로: 섹션들을 2열 CSS grid로 재배치
+    ctrl.style.width="860px";ctrl.style.maxWidth="96vw";
+    body.style.display="grid";
+    body.style.gridTemplateColumns="1fr 1fr 1fr";  // 3열
+    body.style.gap="0 4px";
+    body.style.alignItems="start";
+    if(btn)btn.textContent="⇅ 세로";
+  }else{
+    // 세로: 원래 block 레이아웃으로 복원
+    ctrl.style.width="268px";ctrl.style.maxWidth="";
+    body.style.display="block";
+    body.style.gridTemplateColumns="";
+    if(btn)btn.textContent="⇆ 가로";
+  }
+}
+
+/* === Line Mode (Python open_line_mode() 완전 동일 구현) === */
+const LM_LINE_OPTS=[
+  {lb:"진녹",c:"#00C020"},{lb:"형광",c:"#00FF41"},
+  {lb:"백",  c:"#FFFFFF"},{lb:"황",  c:"#FFE600"},
+  {lb:"청",  c:"#00CFFF"},{lb:"적",  c:"#FF3B3B"},
+];
+const LM_GRID_PRESETS=[
+  {nm:"어둠", dim:"#1A3D1A",g500:"#2D6E2D",edge:"#3D9140"},
+  {nm:"청록", dim:"#0A2E3A",g500:"#0E5A74",edge:"#0B8EA6"},
+  {nm:"보라", dim:"#2A1040",g500:"#5B2D8E",edge:"#8B5CF6"},
+  {nm:"밝음", dim:"#2A2A2A",g500:"#555555",edge:"#888888"},
+  {nm:"꺼짐", dim:"#000000",g500:"#000000",edge:"#000000"},
+];
+const LM_CR_PALETTE=[
+  "#00FF41","#00CFFF","#FFE600","#FF3B3B",
+  "#FF7C00","#BF5AF2","#FF2D78","#00E5BE",
+  "#A8FF3E","#FF9500","#5AC8FA","#FF6B6B",
+];
+let lmState={scale:1.0,colorRotate:false};
+let lmFocusIdx=-1;
+let lmLineColor="#00C020";
+let lmGridDim="#1A3D1A",lmGrid500="#2D6E2D",lmGridEdge="#3D9140";
+let lmOx=0;
+let lmCtrlVisible=true;
+let lmFilmIdx=0;  // 현재 표시 Film 인덱스 (Full 모달과 연동)
+let lmCanvas=null,lmCtx=null;
+
+function openLineMode(){
+  if(!results.length){toast("먼저 배치 계산이 필요합니다");return;}
+  lmFilmIdx=fF>=0&&fF<results.length?fF:0;
+  lmState={scale:1.0,colorRotate:false};
+  lmFocusIdx=-1;lmOx=0;
+  // 캔버스 세팅
+  lmCanvas=document.getElementById("lmCv");
+  lmCtx=lmCanvas.getContext("2d");
+  // 모달 표시
+  const mo=document.getElementById("lineMo");
+  mo.style.display="flex";
+  // 스와치 빌드
+  _lmBuildLineSwatches();
+  _lmBuildGridSwatches();
+  // ox 입력 초기화
+  document.getElementById("lmOxInp").value=0;
+  // 색회전 버튼 초기화
+  const crb=document.getElementById("lmCrBtn");
+  crb.textContent="○ 색회전  OFF";crb.style.background="#1E2128";crb.style.color="#6B7280";
+  // 제어판 표시
+  lmCtrlVisible=true;
+  const ctrl=document.getElementById("lmCtrl");
+  ctrl.style.display="block";
+  /* 제어판 드래그 초기화 — 매번 리셋 */
+  ctrl.style.right="10px"; ctrl.style.top="40px"; ctrl.style.left=""; ctrl.style.bottom="";
+  const handle=document.getElementById("lmCtrlHandle");
+  handle.onmousedown=function(ev){
+    ev.preventDefault();
+    const rect=ctrl.getBoundingClientRect();
+    let ox=ev.clientX-rect.left, oy=ev.clientY-rect.top;
+    handle.style.cursor="grabbing";
+    function onMove(e){
+      let nx=e.clientX-ox, ny=e.clientY-oy;
+      nx=Math.max(0,Math.min(window.innerWidth-ctrl.offsetWidth,nx));
+      ny=Math.max(0,Math.min(window.innerHeight-ctrl.offsetHeight,ny));
+      ctrl.style.left=nx+"px"; ctrl.style.top=ny+"px";
+      ctrl.style.right="auto";
+    }
+    function onUp(){ handle.style.cursor="grab"; document.removeEventListener("mousemove",onMove); document.removeEventListener("mouseup",onUp); }
+    document.addEventListener("mousemove",onMove);
+    document.addEventListener("mouseup",onUp);
+  };
+  // 키보드 이벤트
+  document.addEventListener("keydown",lmKeyDown);
+  setTimeout(()=>{
+    lmCanvas.width=lmCanvas.offsetWidth;
+    lmCanvas.height=lmCanvas.offsetHeight;
+    _updLmFlipBtns();
+    lmDraw();
+  },60);
+  // 마우스휠
+  lmCanvas.onwheel=e=>{e.preventDefault();lmState.scale*=e.deltaY<0?1.1:0.9;lmDraw();};
+}
+
+function closeLineMode(){
+  document.getElementById("lineMo").style.display="none";
+  document.removeEventListener("keydown",lmKeyDown);
+}
+
+function lmToggleCtrl(){
+  lmCtrlVisible=!lmCtrlVisible;
+  document.getElementById("lmCtrl").style.display=lmCtrlVisible?"block":"none";
+}
+
+function _lmBuildLineSwatches(){
+  const box=document.getElementById("lmLineSwatches");box.innerHTML="";
+  LM_LINE_OPTS.forEach(({lb,c})=>{
+    const b=document.createElement("button");
+    const isDark=(parseInt(c.slice(1,3),16)+parseInt(c.slice(3,5),16)+parseInt(c.slice(5,7),16))<400;
+    const fg=isDark?"#FFF":"#111";
+    b.textContent=lb;b.dataset.c=c;
+    Object.assign(b.style,{background:c,color:fg,border:c===lmLineColor?"2px solid #FFF":"2px solid transparent",borderRadius:"4px",padding:"3px 6px",cursor:"pointer",fontSize:"11px",fontFamily:"'맑은 고딕',sans-serif"});
+    b.addEventListener("click",()=>{
+      lmLineColor=c;
+      box.querySelectorAll("button").forEach(bb=>{bb.style.border=bb.dataset.c===c?"2px solid #FFF":"2px solid transparent";});
+      lmDraw();
+    });
+    box.appendChild(b);
+  });
+}
+
+function _lmBuildGridSwatches(){
+  const box=document.getElementById("lmGridSwatches");box.innerHTML="";
+  LM_GRID_PRESETS.forEach(({nm,dim,g500,edge})=>{
+    const b=document.createElement("button");
+    b.textContent=nm;b.dataset.nm=nm;
+    const isActive=(nm==="어둠");
+    Object.assign(b.style,{background:isActive?"#2C313C":"#1E2128",color:isActive?"#CDD0D6":"#6B7280",border:isActive?"2px solid #CDD0D6":"2px solid transparent",borderRadius:"4px",padding:"4px 7px",cursor:"pointer",fontSize:"10px",fontWeight:"700",fontFamily:"'맑은 고딕',sans-serif"});
+    b.addEventListener("click",()=>{
+      lmGridDim=dim;lmGrid500=g500;lmGridEdge=edge;
+      box.querySelectorAll("button").forEach(bb=>{
+        const sel=bb.dataset.nm===nm;
+        bb.style.background=sel?"#2C313C":"#1E2128";
+        bb.style.color=sel?"#CDD0D6":"#6B7280";
+        bb.style.border=sel?"2px solid #CDD0D6":"2px solid transparent";
+      });
+      lmDraw();
+    });
+    box.appendChild(b);
+  });
+}
+
+function lmZoom(f){lmState.scale*=f;lmDraw();}
+function lmReset(){lmState.scale=1.0;lmOx=0;document.getElementById("lmOxInp").value=0;lmFocusIdx=-1;lmDraw();}
+function lmNav(dir){
+  if(!results.length||lmFilmIdx>=results.length)return;
+  const n=results[lmFilmIdx].placed.length;
+  if(dir===+1)lmFocusIdx=lmFocusIdx===-1?0:Math.min(lmFocusIdx+1,n-1);
+  else lmFocusIdx=lmFocusIdx<=0?-1:lmFocusIdx-1;
+  lmDraw();
+}
+function lmOxStep(px){
+  lmOx+=px;document.getElementById("lmOxInp").value=lmOx;lmDraw();
+}
+function lmToggleCr(){
+  lmState.colorRotate=!lmState.colorRotate;
+  const on=lmState.colorRotate,b=document.getElementById("lmCrBtn");
+  b.textContent=on?"● 색회전  ON":"○ 색회전  OFF";
+  b.style.background=on?"#7C3AED":"#1E2128";
+  b.style.color=on?"#FFFFFF":"#6B7280";
+  lmDraw();
+}
+
+function lmKeyDown(e){
+  const mo=document.getElementById("lineMo");
+  if(mo.style.display==="none")return;
+  // 슬라이더에 포커스 있을 때 방향키로 이미지 이동 차단
+  const ae=document.activeElement;
+  if(ae&&ae.type==="range")return;
+  if(e.key==="ArrowRight"){lmOxStep(+100);}
+  else if(e.key==="ArrowLeft"){lmOxStep(-100);}
+  else if(e.key==="ArrowUp"){lmState.scale*=1.1;lmDraw();}
+  else if(e.key==="ArrowDown"){lmState.scale/=1.1;lmDraw();}
+  else if(e.key==="Escape"){lmFocusIdx=-1;lmDraw();}
+}
+
+function lmDraw(){
+  if(!lmCanvas||!lmCtx||!results.length)return;
+  const ox_inp=parseInt(document.getElementById("lmOxInp").value)||0;
+  lmOx=ox_inp;
+  const ctx=lmCtx,cw=lmCanvas.width||window.innerWidth,ch=lmCanvas.height||window.innerHeight;
+  ctx.clearRect(0,0,cw,ch);
+  if(lmFilmIdx>=results.length)return;
+  const res=results[lmFilmIdx],panel=res.panel,placed=res.placed;
+  const lc=lmLineColor,fi=lmFocusIdx;
+  const pLen=panel.length,pWid=panel.width;
+  const pad=100;
+  const scBase=Math.min((cw-pad)/pLen,(ch-pad)/pWid);
+  const sc=scBase*lmState.scale;
+  let ox,oy;
+  if(fi===-1){
+    ox=(cw-pLen*sc)/2+lmOx;oy=(ch-pWid*sc)/2;
+    document.getElementById("lmFocusLbl").textContent="전체보기  |  ▶ 로 이동";
+  } else {
+    const fi2=Math.min(fi,placed.length-1);
+    if(fi2<0){ox=(cw-pLen*sc)/2+lmOx;oy=(ch-pWid*sc)/2;}
+    else{
+      const part=placed[fi2];
+      const partCx=part.x+part.length/2;
+      ox=(cw/2)-partCx*sc+lmOx;oy=(ch-pWid*sc)/2;
+    }
+    document.getElementById("lmFocusLbl").textContent=`조각 ${fi2+1}/${placed.length}  |  Esc : 전체보기`;
+  }
+  const px1=ox,py1=oy,px2=ox+pLen*sc,py2=oy+pWid*sc;
+
+  // ── 그리드 점선 ──────────────────────────────────
+  const gridIntervals=[10,50,100,500,1000];
+  let baseIv=gridIntervals[gridIntervals.length-1];
+  for(const iv of gridIntervals){if(iv*scBase>=6){baseIv=iv;break;}}
+  if(baseIv<100)baseIv=100;
+  const D_THIN=[2,6],D_BOLD=[4,4];
+  // 수직선
+  for(let xmm=baseIv;xmm<pLen;xmm+=baseIv){
+    const xp=px1+xmm*sc;
+    if(xp>px1&&xp<px2){
+      const is500=(xmm%500===0);
+      ctx.strokeStyle=is500?lmGrid500:lmGridDim;
+      const gridLW=parseFloat(document.getElementById("lmGridLW")?.value)||1;
+      ctx.lineWidth=is500?gridLW*1.8:gridLW;
+      ctx.setLineDash(is500?D_BOLD:D_THIN);
+      ctx.beginPath();ctx.moveTo(xp,py1);ctx.lineTo(xp,py2);ctx.stroke();
+    }
+  }
+  // 수평선
+  for(let ymm=baseIv;ymm<pWid;ymm+=baseIv){
+    const yp=py1+ymm*sc;
+    if(yp>py1&&yp<py2){
+      ctx.strokeStyle=lmGridDim;ctx.lineWidth=1;ctx.setLineDash(D_THIN);
+      ctx.beginPath();ctx.moveTo(px1,yp);ctx.lineTo(px2,yp);ctx.stroke();
+    }
+  }
+  // 폭 강조선: 10, 610, 1210mm 고정
+  for(const ey of[10,610,1210]){
+    if(ey>0&&ey<pWid){
+      const yp=py1+ey*sc;
+      const gridLW2=parseFloat(document.getElementById("lmGridLW")?.value)||1;
+      ctx.strokeStyle=lmGridEdge;ctx.lineWidth=gridLW2*2;ctx.setLineDash(D_BOLD);
+      ctx.beginPath();ctx.moveTo(px1,yp);ctx.lineTo(px2,yp);ctx.stroke();
+    }
+  }
+  ctx.setLineDash([]);
+
+  // ── 원자재 외곽선 (가장 진하게, 슬라이더 굵기) ──
+  const panelLW=parseFloat(document.getElementById("lmPanelLW")?.value)||3;
+  ctx.strokeStyle=lc;ctx.lineWidth=panelLW;ctx.setLineDash([]);
+  ctx.strokeRect(px1,py1,pLen*sc,pWid*sc);
+
+  // ── 원자재 치수 ──────────────────────────────────
+  const fsDim=Math.max(10,Math.min(18,Math.floor(sc*pWid/70)));
+  ctx.fillStyle=lc;ctx.textAlign="center";ctx.font=`bold ${fsDim}px 맑은 고딕`;
+  ctx.fillText(String(Math.round(pLen)),(px1+px2)/2,py1-8);
+  ctx.save();ctx.translate(px1-8,(py1+py2)/2);ctx.rotate(-Math.PI/2);
+  ctx.textAlign="center";ctx.fillText(String(Math.round(pWid)),0,0);ctx.restore();
+
+  // ── 텍스트 크기 슬라이더 읽기 ──
+  const lmNameFSv=parseFloat(document.getElementById("lmNameFS")?.value)||14;
+  const lmDimFSv=parseFloat(document.getElementById("lmDimFS")?.value)||11;
+  const partLW2=parseFloat(document.getElementById("lmPartLW")?.value)||2;
+
+  // ── 겹침 감지/회피 헬퍼 ──────────────────────────────
+  const usedDimRects=[];
+  function _rOv(ax,ay,aw,ah,bx,by,bw2,bh2){
+    return Math.abs(ax-bx)<(aw+bw2)*0.5&&Math.abs(ay-by)<(ah+bh2)*0.5;
+  }
+  // 조각 내부에서 겹침 없는 위치 탐색 (격자 탐색으로 강화)
+  function findDimPos(x1,y1,x2,y2,isLen,fsd,margin=3){
+    const txt=String(Math.round(isLen?(x2-x1)/sc:(y2-y1)/sc));
+    const hw=fsd*txt.length*0.32+2,hh=fsd*0.7+2;
+    // 조각 내부 클램프
+    const minX=x1+hw+margin,maxX=x2-hw-margin;
+    const minY=y1+hh+margin,maxY=y2-hh-margin;
+    if(minX>maxX||minY>maxY)return[Math.max(minX,Math.min(maxX,(x1+x2)/2)),Math.max(minY,Math.min(maxY,(y1+y2)/2)),hw,hh];
+    // 후보 위치 (여러 위치 탐색)
+    let cands;
+    if(isLen){
+      cands=[[( x1+x2)/2,y1+margin+hh],[(x1+x2)/2,y2-margin-hh],[(x1+x2)/2,(y1+y2)/2]];
+    } else {
+      cands=[[x1+margin+hw,(y1+y2)/2],[x2-margin-hw,(y1+y2)/2],[(x1+x2)/2,(y1+y2)/2]];
+    }
+    // 격자 탐색: 후보가 겹치면 더 세분화
+    const steps=5;
+    for(let si=0;si<steps;si++){
+      const t=si/(steps-1);
+      if(isLen) cands.push([(x1+x2)/2, y1+hh+margin+(y2-y1-2*hh-2*margin)*t]);
+      else      cands.push([x1+hw+margin+(x2-x1-2*hw-2*margin)*t, (y1+y2)/2]);
+    }
+    let best=null,bestOv=Infinity;
+    for(let [cx,cy] of cands){
+      cx=Math.max(minX,Math.min(maxX,cx));
+      cy=Math.max(minY,Math.min(maxY,cy));
+      const ov=usedDimRects.reduce((s,[rx,ry,rw,rh])=>s+(_rOv(cx,cy,hw,hh,rx,ry,rw,rh)?1:0),0);
+      if(ov===0){best=[cx,cy];break;}
+      if(ov<bestOv){bestOv=ov;best=[cx,cy];}
+    }
+    const[cx,cy]=best||[(x1+x2)/2,(y1+y2)/2];
+    return[Math.max(minX,Math.min(maxX,cx)),Math.max(minY,Math.min(maxY,cy)),hw,hh];
+  }
+
+  placed.forEach((p,i)=>{
+    const bx1=ox+p.x*sc,by1=oy+p.y*sc;
+    const bx2=bx1+p.length*sc,by2=by1+p.width*sc;
+    if(bx2<0||bx1>cw||by2<0||by1>ch)return;
+    const isFocus=(fi!==-1&&i===fi);
+    const bw=bx2-bx1,bh=by2-by1;
+    const partLc=lmState.colorRotate?LM_CR_PALETTE[i%LM_CR_PALETTE.length]:lc;
+
+    // 조각 라인 (항상 원자재/그리드 위 — 겹침 시 조각 우선)
+    ctx.strokeStyle=partLc;ctx.lineWidth=isFocus?partLW2*2:partLW2;
+    ctx.setLineDash([]);ctx.strokeRect(bx1,by1,bw,bh);
+
+    // 이름 — 여백 따라 한줄/두줄 자동 선택
+    if(bw>24&&bh>14){
+      const lmFS=Math.max(7,Math.min(lmNameFSv,Math.floor(Math.min(bw/5,bh/2.5))));
+      const {twoLine:lmTL,line1:lmL1,line2:lmL2}=partLabelLines(panel.name,p.name,bw,bh,lmFS);
+      const lmCx=(bx1+bx2)/2,lmCy=(by1+by2)/2;
+      ctx.fillStyle=partLc;ctx.textAlign="center";
+      if(lmTL&&lmL1&&lmL2&&bh>lmFS*2.8){
+        const lmfs1=Math.max(7,Math.min(lmFS,Math.floor(bw/(lmL1.length*0.65+1))));
+        const lmfs2=Math.max(6,Math.min(lmFS-1,Math.floor(bw/(lmL2.length*0.65+1))));
+        const lmny1=Math.max(by1+lmfs1+2,Math.min(lmCy,lmCy-lmfs2*0.6));
+        const lmny2=Math.max(lmny1+lmfs1*0.5,Math.min(by2-2,lmCy+lmfs2*0.8));
+        ctx.font=`bold ${lmfs1}px 맑은 고딕`;ctx.fillText(lmL1,lmCx,lmny1);
+        ctx.font=`bold ${lmfs2}px 맑은 고딕`;ctx.fillText(lmL2,lmCx,lmny2);
+        const lmNW=Math.max(lmfs1*lmL1.length*0.55,lmfs2*lmL2.length*0.55)+2;
+        usedDimRects.push([lmCx,(lmny1+lmny2)/2,lmNW,(lmny2-lmny1+lmfs2)]);
+      } else if(lmL1){
+        const fsN=Math.max(7,Math.min(lmFS,Math.floor(Math.min(bw/(lmL1.length*0.6+1),bh/2.5))));
+        const nameW=fsN*lmL1.length*0.55+2,nameH=fsN;
+        const nx=Math.max(bx1+nameW/2+2,Math.min(bx2-nameW/2-2,lmCx));
+        const ny=Math.max(by1+nameH+2,Math.min(by2-2,lmCy+fsN*0.35));
+        ctx.font=`bold ${fsN}px 맑은 고딕`;ctx.fillText(lmL1,nx,ny);
+        usedDimRects.push([nx,ny-nameH*0.5,nameW,nameH]);
+      }
+    }
+
+    // 길이 치수 — 조각 내부, 겹침 자동 회피
+    if(bw>28){
+      const fsd=Math.max(5,Math.min(lmDimFSv,Math.floor(bw/8)));
+      const[cx,cy,hw,hh]=findDimPos(bx1,by1,bx2,by2,true,fsd);
+      ctx.fillStyle=partLc;ctx.textAlign="center";ctx.font=`${fsd}px Courier New`;
+      ctx.fillText(String(Math.round(p.length)),cx,cy+fsd*0.35);
+      usedDimRects.push([cx,cy,hw,hh]);
+    }
+    // 폭 치수 — 조각 내부, 겹침 자동 회피
+    if(bh>18){
+      const fsd=Math.max(5,Math.min(lmDimFSv,Math.floor(bh/4)));
+      const[cx,cy,hw,hh]=findDimPos(bx1,by1,bx2,by2,false,fsd);
+      ctx.fillStyle=partLc;ctx.textAlign="center";ctx.font=`${fsd}px Courier New`;
+      ctx.fillText(String(Math.round(p.width)),cx,cy+fsd*0.35);
+      usedDimRects.push([cx,cy,hw,hh]);
+    }
+  });
+}
+
+// Line Mode 캔버스 resize
+window.addEventListener("resize",()=>{
+  const mo=document.getElementById("lineMo");
+  if(mo&&mo.style.display!=="none"&&lmCanvas){
+    lmCanvas.width=lmCanvas.offsetWidth;lmCanvas.height=lmCanvas.offsetHeight;lmDraw();
+  }
+});
+function toggleGridMode(){
+  gridMode=!gridMode;
+  const btn=document.getElementById("gridModeBtn");
+  if(btn){btn.style.background=gridMode?"var(--bb)":"var(--cv)";btn.style.color=gridMode?"#fff":"var(--tx)";btn.style.borderColor=gridMode?"var(--bb)":"var(--ln)";}
+  drawFull();
+}
+
+/* === 색상 모달 === */
+function buildCG(){
+  const g=document.getElementById("cg");g.innerHTML="";
+  COLORS.forEach(c=>{
+    const d=document.createElement("div");d.className="cdot";d.style.background=c;
+    d.addEventListener("click",()=>{const{pi,ji}=_cTgt;if(pi>=0&&ji>=0){parts[pi][ji].color=c;rebuildSec(pi);schedCalc();}cmo(0);});
+    g.appendChild(d);
+  });
+}
+function cmo(id){
+  if(id===0)document.getElementById("colorMo").classList.remove("on");
+  else document.getElementById(id).classList.toggle("on",false);
+}
+
+/* === 통계 === */
+function openStats(){
+  if(!results.length){toast("먼저 배치 계산이 필요합니다");return;}
+  let html="",tL=0,tU=0,tP=0;
+  results.forEach((r,i)=>{
+    const u=r.placed.length?Math.max(...r.placed.map(p=>p.x+p.length)):0;
+    const rm=Math.max(0,r.panel.length-u),ratio=r.panel.length?u/r.panel.length:0;
+    tL+=r.panel.length;tU+=u;tP+=r.placed.length;
+    html+=`<div style="background:var(--cv);border:1px solid var(--ln);border-radius:6px;padding:11px;margin-bottom:8px">
+      <div style="font-size:12px;font-weight:700;color:var(--hd);margin-bottom:8px">${i+1}. ${esc(r.panel.name||"Film")}</div>
+      <div class="sg">
+        <div class="sc"><div class="sl">총 길이</div><div class="sv a">${fd(r.panel.length/1000)}m</div></div>
+        <div class="sc"><div class="sl">사용 길이</div><div class="sv">${fd(u/1000)}m</div></div>
+        <div class="sc"><div class="sl">잔여 길이</div><div class="sv d">${fd(rm/1000)}m</div></div>
+        <div class="sc"><div class="sl">배치 조각</div><div class="sv">${r.placed.length}개</div></div>
+      </div>
+      <div style="font-size:11px;color:var(--hd);display:flex;justify-content:space-between;margin-bottom:4px"><span>사용률</span><span>${(ratio*100).toFixed(1)}%</span></div>
+      <div style="background:var(--ln);border-radius:4px;height:5px;overflow:hidden"><div style="height:100%;background:linear-gradient(90deg,#343A40,#339AF0);width:${(ratio*100).toFixed(1)}%"></div></div>
+    </div>`;
+  });
+  const tr=tL?tU/tL:0;
+  html=`<div class="sg" style="margin-bottom:12px">
+    <div class="sc"><div class="sl">전체 길이</div><div class="sv a">${fd(tL/1000)}m</div></div>
+    <div class="sc"><div class="sl">전체 잔여</div><div class="sv d">${fd(Math.max(0,tL-tU)/1000)}m</div></div>
+    <div class="sc"><div class="sl">총 조각수</div><div class="sv">${tP}개</div></div>
+    <div class="sc"><div class="sl">평균 사용률</div><div class="sv">${(tr*100).toFixed(1)}%</div></div>
+  </div>`+html;
+  document.getElementById("statsC").innerHTML=html;
+  document.getElementById("statsMo").classList.add("on");
+}
+
+/* === 계정 === */
+function togglePwVis(inputId, btn) {
+  const inp = document.getElementById(inputId);
+  if (inp.type === "password") { inp.type = "text"; btn.textContent = "🙈"; }
+  else { inp.type = "password"; btn.textContent = "👁"; }
+}
+
+async function openUsers(){
+  document.getElementById("usersMo").classList.add("on");
+  await refreshUList();
+}
+
+async function refreshUList(){
+  const el = document.getElementById("uList");
+  if(!window._fbReady){
+    el.innerHTML="<p style='font-size:12px;color:#868E96;padding:8px 0'>⏳ Firebase 연결 중... 잠시 후 다시 시도하세요.</p>";
+    return;
+  }
+  el.innerHTML="<p style='font-size:12px;color:#868E96;padding:4px 0'>불러오는 중...</p>";
+  const users = await window._fbGetUsers();
+  const keys = Object.keys(users);
+  if(!keys.length){
+    el.innerHTML="<p style='font-size:12px;color:#868E96;padding:4px 0'>등록된 계정이 없습니다.</p>";
+    return;
+  }
+  el.innerHTML = keys.map(u=>`
+    <div class="ui">
+      <span style="font-size:16px">👤</span>
+      <span class="uid">${esc(u)}</span>
+      <span class="upw">●●●●●</span>
+      <button class="udel" onclick="delUser('${esc(u)}')">삭제</button>
+    </div>`).join("");
+}
+
+async function upsertUser(){
+  const uid = document.getElementById("nUid").value.trim();
+  const pw  = document.getElementById("nPwd").value.trim();
+  if(!uid || !pw){ toast("⚠️ 아이디와 비밀번호를 모두 입력하세요"); return; }
+
+  /* Firebase 준비 대기 (최대 5초) */
+  let w=0;
+  while(!window._fbReady && w<50){ await new Promise(r=>setTimeout(r,100)); w++; }
+  if(!window._fbReady){ toast("⏳ Firebase 연결 실패. 새로고침 후 다시 시도하세요."); return; }
+
+  const btn = document.getElementById("upsertBtn");
+  btn.textContent = "저장 중..."; btn.disabled = true;
+
+  try{
+    const users = await window._fbGetUsers();
+    const isNew = !users[uid];
+    /* 비밀번호 SHA-256 해시 변환 */
+    users[uid] = await window._sha256(pw);
+    const ok = await window._fbSaveUsers(users);
+    if(ok){
+      toast(isNew ? `✅ '${uid}' 계정이 추가됐습니다` : `✅ '${uid}' 비밀번호가 변경됐습니다`);
+      document.getElementById("nUid").value = "";
+      document.getElementById("nPwd").value = "";
+      await refreshUList();
+    } else {
+      toast("❌ 저장 실패 — Firebase 오류");
+    }
+  } catch(e){
+    toast("❌ 오류: " + e.message);
+    console.error("upsertUser error:", e);
+  } finally {
+    btn.textContent = "✅ 추가 / 변경 적용"; btn.disabled = false;
+  }
+}
+
+async function delUser(uid){
+  if(!confirm(`'${uid}' 계정을 삭제할까요?`)) return;
+  const users = await window._fbGetUsers();
+  if(Object.keys(users).length <= 1){ toast("⚠️ 최소 1개 계정이 필요합니다"); return; }
+  delete users[uid];
+  const ok = await window._fbSaveUsers(users);
+  if(ok){ toast(`🗑 '${uid}' 삭제됐습니다`); await refreshUList(); }
+  else toast("❌ 삭제 실패 — Firebase 오류");
+}
+
+/* === GitHub Gists === */
+async function openGists(){
+  document.getElementById("gistsMo").classList.add("show");
+  document.getElementById("gistToken").value=window._gist_token||"";
+  document.getElementById("gistId").value=window._gist_id||"";
+}
+async function saveGistSettings(){
+  const token=document.getElementById("gistToken").value.trim();
+  const gid=document.getElementById("gistId").value.trim();
+  if(!token){toast("GitHub Token을 입력해주세요.");return;}
+  window._gist_token=token;window._gist_id=gid;
+  // 브라우저에 영구 저장 — 재실행해도 유지
+  localStorage.setItem("cut_gist_token",token);
+  localStorage.setItem("cut_gist_id",gid);
+  document.getElementById("gistsMo").classList.remove("show");
+  toast("✅ GitHub Gist 설정 저장 — 자동저장 테스트 중...");
+  const db=getPD();
+  gistSaveAuto(db,false);
+}
+async function gistSave(){
+  const token=window._gist_token||"";
+  if(!token){toast("먼저 토큰을 설정하세요");return;}
+  const db=getPD();
+  await gistSaveAuto(db,false);
+}
+async function gistLoad(){
+  const token=window._gist_token||"";
+  const gid=window._gist_id||"";
+  if(!token||!gid){toast("토큰과 Gist ID를 설정하세요");return;}
+  if(!confirm("Gist에서 불러오면 현재 내용이 교체됩니다. 계속할까요?"))return;
+  toast("📥 Gist에서 불러오는 중...");
+  try{
+    const res=await fetch("https://api.github.com/gists/"+gid,{
+      headers:{"Authorization":"token "+token}
+    });
+    if(!res.ok)throw new Error("HTTP "+res.status);
+    const json=await res.json();
+    const fileKey=Object.keys(json.files)[0];
+    const file=json.files[fileKey];
+    // truncated 파일은 raw_url로 다시 받기
+    const content=file.truncated
+      ? await(await fetch(file.raw_url)).text()
+      : file.content;
+    if(!content)throw new Error("파일 내용 없음");
+    loadPD(JSON.parse(content));
+    toast("✅ GitHub Gist 불러오기 완료");
+  }catch(e){toast("❌ Gist 불러오기 실패: "+e.message);}
+}
+
+/* === Firebase === */
+function getPD(){
+  return{
+    site_name:document.getElementById("siteName").value,
+    panels:panels.map(p=>({name:p.name,length:+p.length,width:+p.width,grain:p.grain})),
+    flipX:flipX.slice(),flipY:flipY.slice(),turnSt:turnSt.slice(),
+    parts:parts.map(ps=>ps.map(p=>({name:p.name,length:+p.length,width:+p.width,quantity:+p.quantity||1,color:p.color})))
+  };
+}
+function loadPD(data){
+  document.getElementById("siteName").value=data.site_name||"";cidx=0;
+  panels=(data.panels||[]).map(p=>({name:p.name||"",length:p.length||"",width:p.width||"",grain:p.grain||false}));
+  flipX=(data.flipX||[]).map(v=>!!v);flipY=(data.flipY||[]).map(v=>!!v);turnSt=(data.turnSt||[]).map(v=>!!v);
+  while(flipX.length<panels.length)flipX.push(false);
+  while(flipY.length<panels.length)flipY.push(false);
+  while(turnSt.length<panels.length)turnSt.push(false);
+  parts=(data.parts||[]).map(ps=>ps.map(p=>({name:p.name||"",length:p.length||"",width:p.width||"",quantity:p.quantity||1,color:p.color||nc()})));
+  if(!panels.length){panels=[{name:"",length:"",width:"",grain:false}];parts=[[{name:"",length:"",width:"",quantity:1,color:nc()}]];}
+  renderPanelTbl();document.getElementById("partsSecs").innerHTML="";
+  panels.forEach((_,i)=>document.getElementById("partsSecs").appendChild(buildSec(i)));
+  schedCalc();
+}
+/* === 저장 상태 표시 === */
+let _autoSaveTimer=null;
+let _gistTimer=null; // Gist 저장 전용 타이머 (60초 디바운스)
+function setFbStatus(state,time){
+  const el=document.getElementById("fbStatus");if(!el)return;
+  if(state==="saving")el.textContent="☁️ 저장 중...";
+  else if(state==="ok")el.textContent="☁️ "+time;
+  else if(state==="err")el.textContent="☁️ ❌";
+}
+function setGistStatus(state,time){
+  const el=document.getElementById("gistStatus2");if(!el)return;
+  if(state==="saving")el.textContent="🐙 저장 중...";
+  else if(state==="ok")el.textContent="🐙 "+time;
+  else if(state==="err")el.textContent="🐙 ❌";
+}
+function schedAutoSave(){
+  clearTimeout(_autoSaveTimer);
+  _autoSaveTimer=setTimeout(async()=>{
+    await autoFbSave();
+  },5000);
+  // Gist는 60초 디바운스 — 입력 중 반복 API 호출 방지
+  clearTimeout(_gistTimer);
+  _gistTimer=setTimeout(()=>{
+    const db=getPD();
+    gistSaveAuto(db,true);
+  },60000);
+}
+async function autoFbSave(){
+  if(!window._fbReady)return;
+  setFbStatus("saving");
+  const data=getPD();data._savedBy=CU;
+  const res=await window._fbSave(data);
+  if(res.ok){const t=new Date(res.savedAt);setFbStatus("ok",t.getHours().toString().padStart(2,"0")+":"+t.getMinutes().toString().padStart(2,"0"));}
+  else setFbStatus("err");
+}
+
+// ── GitHub Gist 저장 (PATCH: 기존 Gist 수정 / POST: 새 Gist 생성) ──
+async function gistSaveAuto(db, quiet){
+  const token=window._gist_token||"";
+  if(!token)return;
+  setGistStatus("saving");
+  const payload=JSON.stringify(db,null,2);
+  const site=(db&&db.site_name)||"cutting_s";
+  const filename=`${site}_data.json`;
+  const body={files:{[filename]:{content:payload}}};
+  try{
+    let res;
+    const gid=window._gist_id||"";
+    if(gid){
+      res=await fetch("https://api.github.com/gists/"+gid,{
+        method:"PATCH",
+        headers:{"Authorization":"token "+token,"Content-Type":"application/json"},
+        body:JSON.stringify(body)
+      });
+      if(res.ok){
+        const now=new Date();setGistStatus("ok",now.getHours().toString().padStart(2,"0")+":"+now.getMinutes().toString().padStart(2,"0"));
+        if(!quiet)toast("✅ GitHub 자동저장 완료 ✓");
+      }else{
+        setGistStatus("err");
+        const errJson=await res.json().catch(()=>({}));
+        if(!quiet)toast("❌ GitHub 저장 실패: "+(errJson.message||res.status));
+      }
+    }else{
+      res=await fetch("https://api.github.com/gists",{
+        method:"POST",
+        headers:{"Authorization":"token "+token,"Content-Type":"application/json"},
+        body:JSON.stringify(Object.assign({description:"cutting_s 재단 데이터 자동백업",public:false},body))
+      });
+      if(res.ok){
+        const json=await res.json();
+        window._gist_id=json.id;
+        localStorage.setItem("cut_gist_id",json.id); // 새로 생성된 ID 영구 저장
+        document.getElementById("gistId")&&(document.getElementById("gistId").value=json.id);
+        const now=new Date();setGistStatus("ok",now.getHours().toString().padStart(2,"0")+":"+now.getMinutes().toString().padStart(2,"0"));
+        if(!quiet)toast("✅ GitHub Gist 생성 완료! ID: "+json.id);
+      }else{
+        setGistStatus("err");
+        const errJson=await res.json().catch(()=>({}));
+        if(!quiet)toast("❌ GitHub 저장 실패: "+(errJson.message||res.status));
+      }
+    }
+  }catch(e){
+    setGistStatus("err");
+    if(!quiet)toast("❌ GitHub 저장 오류: "+e.message);
+  }
+}
+async function fbSave(){
+  if(!window._fbReady){toast("Firebase 연결 중...");return;}
+  setFbStatus("saving");toast("☁️ 저장 중...");
+  const data=getPD();data._savedBy=CU;const res=await window._fbSave(data);
+  if(res.ok){const t=new Date(res.savedAt);setFbStatus("ok",t.getHours().toString().padStart(2,"0")+":"+t.getMinutes().toString().padStart(2,"0"));toast("☁️ 저장 완료 ("+t.toLocaleString("ko-KR")+")");}
+  else{setFbStatus("err");toast("❌ 저장 실패: "+(res.error||""));}
+}
+async function fbLoad(){
+  if(!window._fbReady){toast("Firebase 연결 중...");return;}
+  if(!confirm("클라우드에서 불러오면 현재 내용이 교체됩니다. 계속할까요?"))return;
+  toast("☁️ 불러오는 중...");const res=await window._fbLoad();
+  if(res.ok){loadPD(res.data);const w=res.savedAt?new Date(res.savedAt).toLocaleString("ko-KR"):"";toast("☁️ 완료"+(res.savedBy?" ("+res.savedBy+")":" ")+" "+w);}
+  else toast("❌ "+(res.error||"저장된 데이터 없음"));
+}
+async function fbBackups(){
+  if(!window._fbReady){toast("Firebase 연결 중...");return;}
+  const list=await window._fbListBackups();if(!list.length){toast("저장된 백업이 없습니다");return;}
+  document.getElementById("bkList").innerHTML=list.map(b=>{const w=b.savedAt?new Date(b.savedAt).toLocaleString("ko-KR"):b.id;return`<div class="bki" onclick="fbRestore('${b.id}')"><span class="bkw">${w}</span><span class="bkb">${esc(b.savedBy||"-")}</span><span style="color:var(--ac);font-size:12px">복원 ▶</span></div>`;}).join("");
+  document.getElementById("backupMo").classList.add("on");
+}
+async function fbRestore(id){
+  if(!confirm("이 백업으로 복원할까요?"))return;
+  const res=await window._fbLoadBackup(id);
+  if(res.ok){loadPD(res.data);document.getElementById("backupMo").classList.remove("on");toast("☁️ 복원 완료");}
+  else toast("❌ 복원 실패");
+}
+async function autoLoad(){
+  // Gist 토큰/ID 복원 (localStorage 영구 저장값)
+  window._gist_token=localStorage.getItem("cut_gist_token")||"";
+  window._gist_id=localStorage.getItem("cut_gist_id")||"";
+  if(!window._fbReady)return;if(panels.some(p=>p.length||p.width))return;
+  const res=await window._fbLoad();if(!res.ok)return;loadPD(res.data);
+  const w=res.savedAt?new Date(res.savedAt).toLocaleString("ko-KR"):"";toast("☁️ 복원"+(res.savedBy?" ("+res.savedBy+")":" ")+" "+w);
+}
+
+/* === 로컬 저장 === */
+function localSave(){const d=getPD();const b=new Blob([JSON.stringify(d,null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(b);a.download=`${d.site_name||"cutting_s"}_${tod()}.json`;a.click();toast("💾 기기에 저장했습니다");}
+function localLoad(){document.getElementById("fileInp").click();}
+function onFileLoad(e){const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=ev=>{try{loadPD(JSON.parse(ev.target.result));toast("📂 불러오기 완료");}catch{toast("❌ 파일 형식 오류");}};r.readAsText(f);e.target.value="";}
+
+/* === 내보내기 === */
+function exportPDF(){
+  if(!results.length){toast("배치 계산 먼저 하세요");return;}
+  const{jsPDF}=window.jspdf,doc=new jsPDF({orientation:"landscape",unit:"mm",format:"a4"});
+  const pw=297,ph=210,site=document.getElementById("siteName").value;
+  results.forEach((res,ri)=>{
+    if(ri>0)doc.addPage();
+    const mg=15,ih=18,dw=pw-mg*2,dh=ph-mg*2-10-ih;
+    const sc=Math.min(dw/res.panel.length,dh/res.panel.width);
+    const ox=mg+(dw-res.panel.length*sc)/2,oy=mg+ih+5;
+    doc.setFontSize(11);doc.setTextColor(73,80,87);doc.text(site?`${site} - ${res.panel.name||"Film"}`:(res.panel.name||"Film"),pw/2,12,{align:"center"});
+    doc.setFillColor(255,255,255);doc.setDrawColor(73,80,87);doc.setLineWidth(.4);doc.rect(ox,oy,res.panel.length*sc,res.panel.width*sc,"FD");
+    doc.setFontSize(8);doc.text(fd(res.panel.length/1000)+"m",ox+res.panel.length*sc/2,oy-2,{align:"center"});
+    res.remaining.forEach(r=>{if(r[2]<2||r[3]<2)return;doc.setDrawColor(224,49,49);doc.setLineWidth(.3);doc.setLineDashPattern([1,.5],0);doc.rect(ox+r[0]*sc,oy+r[1]*sc,r[2]*sc,r[3]*sc,"S");doc.setLineDashPattern([],0);});
+    doc.setLineWidth(.2);
+    res.placed.forEach(p=>{
+      const hx=parseInt(p.color.slice(1,3),16),hy=parseInt(p.color.slice(3,5),16),hz=parseInt(p.color.slice(5,7),16);
+      doc.setFillColor(hx,hy,hz);doc.setDrawColor(68,68,68);doc.rect(ox+p.x*sc,oy+p.y*sc,p.length*sc,p.width*sc,"FD");
+      if(p.name&&p.length*sc>8&&p.width*sc>5){const br=(hx*299+hy*587+hz*114)/1000;doc.setTextColor(br>160?51:255,br>160?51:255,br>160?51:255);doc.setFontSize(Math.max(4,Math.min(7,Math.floor(Math.min(p.length*sc/8,p.width*sc/3)))));doc.text(p.name,ox+(p.x+p.length/2)*sc,oy+(p.y+p.width/2)*sc,{align:"center",baseline:"middle"});}
+    });
+    const used=res.placed.length?Math.max(...res.placed.map(p=>p.x+p.length)):0,rem=Math.max(0,res.panel.length-used);
+    doc.setFillColor(255,255,255);doc.setDrawColor(206,212,218);doc.setLineWidth(.3);doc.rect(pw-60,ph-22,56,18,"FD");doc.setFontSize(7);doc.setTextColor(51,51,51);
+    doc.text(`총길이: ${fd(res.panel.length/1000)}m`,pw-58,ph-18);doc.text(`사용: ${fd(used/1000)}m`,pw-58,ph-13);doc.text(`잔여: ${fd(rem/1000)}m`,pw-58,ph-8);doc.text(`조각: ${res.placed.length}개`,pw-58,ph-3);
+  });
+  doc.save((site||"cutting_s")+"_"+tod()+".pdf");toast("📄 PDF 저장 완료");
+}
+function exportExcel(){
+  if(!results.length){toast("배치 계산 먼저 하세요");return;}
+  const wb=XLSX.utils.book_new(),site=document.getElementById("siteName").value;
+  let rows=[];if(site)rows.push(["현장명: "+site]);rows.push(["Film","조각명","길이(mm)","폭(mm)","X위치","Y위치","색상","배치순"]);
+  results.forEach(res=>{const pn=res.panel.name||"Film";res.placed.forEach((p,j)=>rows.push([pn,p.name,Math.round(p.length),Math.round(p.width),Math.round(p.x),Math.round(p.y),p.color,j+1]));});
+  const ws=XLSX.utils.aoa_to_sheet(rows);ws["!cols"]=[{wch:15},{wch:15},{wch:12},{wch:12},{wch:10},{wch:10},{wch:12},{wch:8}];
+  XLSX.utils.book_append_sheet(wb,ws,"Cutting List");XLSX.writeFile(wb,(site||"cutting_s")+"_"+tod()+".xlsx");toast("📊 Excel 저장 완료");
+}
+
+/* === 초기화 === */
+function resetAll(){
+  if(!confirm("모든 입력을 초기화할까요?"))return;
+  cidx=0;panels=[{name:"",length:"",width:"",grain:false}];parts=[[{name:"",length:"",width:"",quantity:1,color:nc()}]];
+  document.getElementById("siteName").value="";results=[];curFilm=0;
+  renderPanelTbl();document.getElementById("partsSecs").innerHTML="";
+  document.getElementById("partsSecs").appendChild(buildSec(0));
+  drawCV();updIB();toast("🔄 초기화 완료");
+}
+
+/* === 리사이저 === */
+function initRZ(){
+  const rz=document.getElementById("RZ"),lp=document.getElementById("LP");
+  let sx,sw;
+  rz.addEventListener("mousedown",e=>{
+    sx=e.clientX;sw=lp.offsetWidth;document.body.style.cursor="col-resize";document.body.style.userSelect="none";
+    const mv=e=>{const w=Math.min(Math.max(sw+(e.clientX-sx),250),900);lp.style.width=w+"px";drawCV();};
+    const up=()=>{document.body.style.cursor="";document.body.style.userSelect="";document.removeEventListener("mousemove",mv);document.removeEventListener("mouseup",up);};
+    document.addEventListener("mousemove",mv);document.addEventListener("mouseup",up);
+  });
+}
+
+/* === 모바일 탭 === */
+function mobTab(t){
+  const lp=document.getElementById("LP"),rp=document.getElementById("RP");
+  document.getElementById("mtIn").classList.toggle("on",t==="in");
+  document.getElementById("mtCv").classList.toggle("on",t==="cv");
+  if(t==="in"){lp.classList.add("ms");rp.classList.remove("ms");}
+  else{lp.classList.remove("ms");rp.classList.add("ms");setTimeout(()=>{resizeCV();drawCV();},80);}
+}
+
+/* === 토스트 === */
+let _tt=null;
+function toast(m){const e=document.getElementById("toast");e.textContent=m;e.classList.add("show");clearTimeout(_tt);_tt=setTimeout(()=>e.classList.remove("show"),2600);}
+
+window.addEventListener("resize",()=>{if(document.getElementById("AS").classList.contains("on")){resizeCV();drawCV();}});
+
+/* === PWA 서비스워커 등록 === */
+if('serviceWorker' in navigator){
+  window.addEventListener('load',()=>{
+    navigator.serviceWorker.register('sw.js')
+      .then(r=>console.log('SW registered'))
+      .catch(e=>console.log('SW error',e));
+  });
+}
+</script>
+</body>
+</html>
