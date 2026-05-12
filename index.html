@@ -581,33 +581,61 @@ body{font-family:var(--font);background:var(--bg);color:var(--tx);height:100vh;o
         <div style="font-size:9px;color:#6B7280;padding:0 8px 6px;text-align:center">조각마다 다른 색으로 구분 표시</div>
       </div>
     </div>
-    <!-- 섹션6: 라인 굵기 -->
+    <!-- 섹션6: 조각 라인 굵기 -->
     <div style="padding:8px 10px 0">
-      <div style="font-size:9px;font-weight:700;color:#6B7280;margin-bottom:3px">━ 라인 굵기</div>
+      <div style="font-size:9px;font-weight:700;color:#6B7280;margin-bottom:3px">━ 조각 라인 굵기</div>
       <div style="background:#1E2128;border:1px solid #2A2D36;border-radius:5px;padding:8px">
-        <!-- 원자재 라인 굵기 -->
-        <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
-          <span style="font-size:9px;color:#ADB5BD;width:52px;flex-shrink:0">원자재</span>
-          <input id="lmPanelLW" type="range" min="1" max="12" step="0.5" value="3"
-            style="flex:1;accent-color:#60A5FA;cursor:pointer"
-            oninput="document.getElementById('lmPanelLWVal').textContent=this.value;lmDraw()">
-          <span id="lmPanelLWVal" style="font-size:10px;color:#60A5FA;width:22px;text-align:right;font-weight:700">3</span>
-        </div>
-        <!-- 조각 라인 굵기 -->
-        <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
-          <span style="font-size:9px;color:#ADB5BD;width:52px;flex-shrink:0">조각</span>
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+          <span style="font-size:9px;color:#ADB5BD;width:56px;flex-shrink:0">조각라인</span>
           <input id="lmPartLW" type="range" min="1" max="12" step="0.5" value="2"
             style="flex:1;accent-color:#34D399;cursor:pointer"
-            oninput="document.getElementById('lmPartLWVal').textContent=this.value;lmDraw()">
-          <span id="lmPartLWVal" style="font-size:10px;color:#34D399;width:22px;text-align:right;font-weight:700">2</span>
+            oninput="document.getElementById('lmPartLWVal').textContent=this.value;lmDraw()"
+            onmousedown="this.dataset.focused='1'" onblur="this.dataset.focused='0'">
+          <span id="lmPartLWVal" style="font-size:10px;color:#34D399;width:26px;text-align:right;font-weight:700">2</span>
         </div>
-        <!-- 그리드 라인 굵기 -->
-        <div style="display:flex;align-items:center;gap:6px">
-          <span style="font-size:9px;color:#ADB5BD;width:52px;flex-shrink:0">그리드</span>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <span style="font-size:9px;color:#ADB5BD;width:56px;flex-shrink:0">그리드</span>
           <input id="lmGridLW" type="range" min="0.5" max="4" step="0.5" value="1"
             style="flex:1;accent-color:#9CA3AF;cursor:pointer"
-            oninput="document.getElementById('lmGridLWVal').textContent=this.value;lmDraw()">
-          <span id="lmGridLWVal" style="font-size:10px;color:#9CA3AF;width:22px;text-align:right;font-weight:700">1</span>
+            oninput="document.getElementById('lmGridLWVal').textContent=this.value;lmDraw()"
+            onmousedown="this.dataset.focused='1'" onblur="this.dataset.focused='0'">
+          <span id="lmGridLWVal" style="font-size:10px;color:#9CA3AF;width:26px;text-align:right;font-weight:700">1</span>
+        </div>
+      </div>
+    </div>
+    <!-- 섹션6b: 원자재 라인 굵기 -->
+    <div style="padding:8px 10px 0">
+      <div style="font-size:9px;font-weight:700;color:#6B7280;margin-bottom:3px">━ 원자재 라인 굵기</div>
+      <div style="background:#1E2128;border:1px solid #2A2D36;border-radius:5px;padding:8px">
+        <div style="display:flex;align-items:center;gap:6px;">
+          <span style="font-size:9px;color:#ADB5BD;width:56px;flex-shrink:0">원자재</span>
+          <input id="lmPanelLW" type="range" min="1" max="12" step="0.5" value="3"
+            style="flex:1;accent-color:#60A5FA;cursor:pointer"
+            oninput="document.getElementById('lmPanelLWVal').textContent=this.value;lmDraw()"
+            onmousedown="this.dataset.focused='1'" onblur="this.dataset.focused='0'">
+          <span id="lmPanelLWVal" style="font-size:10px;color:#60A5FA;width:26px;text-align:right;font-weight:700">3</span>
+        </div>
+      </div>
+    </div>
+    <!-- 섹션6c: 텍스트 크기 -->
+    <div style="padding:8px 10px 0">
+      <div style="font-size:9px;font-weight:700;color:#6B7280;margin-bottom:3px">✎ 텍스트 크기</div>
+      <div style="background:#1E2128;border:1px solid #2A2D36;border-radius:5px;padding:8px">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+          <span style="font-size:9px;color:#ADB5BD;width:56px;flex-shrink:0">조각이름</span>
+          <input id="lmNameFS" type="range" min="6" max="32" step="1" value="14"
+            style="flex:1;accent-color:#FBBF24;cursor:pointer"
+            oninput="document.getElementById('lmNameFSVal').textContent=this.value;lmDraw()"
+            onmousedown="this.dataset.focused='1'" onblur="this.dataset.focused='0'">
+          <span id="lmNameFSVal" style="font-size:10px;color:#FBBF24;width:26px;text-align:right;font-weight:700">14</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <span style="font-size:9px;color:#ADB5BD;width:56px;flex-shrink:0">치수숫자</span>
+          <input id="lmDimFS" type="range" min="5" max="24" step="1" value="11"
+            style="flex:1;accent-color:#F87171;cursor:pointer"
+            oninput="document.getElementById('lmDimFSVal').textContent=this.value;lmDraw()"
+            onmousedown="this.dataset.focused='1'" onblur="this.dataset.focused='0'">
+          <span id="lmDimFSVal" style="font-size:10px;color:#F87171;width:26px;text-align:right;font-weight:700">11</span>
         </div>
       </div>
     </div>
@@ -1590,7 +1618,30 @@ function drawCV(){
   });
   ctx.setLineDash([]);
 
-  // ── 조각 (PC앱 draw_placed_parts 동일: 이름 중앙, 길이 상단, 폭 좌측) ──
+  // ── 조각: 이름+치수 겹침 자동 회피 ──
+  const cvUsed=[];
+  function _cvRov(ax,ay,aw,ah,bx,by,bw2,bh2){return Math.abs(ax-bx)<(aw+bw2)*0.5&&Math.abs(ay-by)<(ah+bh2)*0.5;}
+  function cvFindPos(x1,y1,x2,y2,isLen,fsd,sc2){
+    const txt=String(Math.round(isLen?(x2-x1)/sc2:(y2-y1)/sc2));
+    const hw=fsd*txt.length*0.32+2,hh=fsd*0.7+2;
+    const mg=2;
+    const minX=x1+hw+mg,maxX=x2-hw-mg,minY=y1+hh+mg,maxY=y2-hh-mg;
+    if(minX>maxX||minY>maxY)return[Math.max(minX,Math.min(maxX,(x1+x2)/2)),Math.max(minY,Math.min(maxY,(y1+y2)/2)),hw,hh];
+    let cands=isLen?[[(x1+x2)/2,y1+mg+hh],[(x1+x2)/2,y2-mg-hh],[(x1+x2)/2,(y1+y2)/2]]
+                   :[[x1+mg+hw,(y1+y2)/2],[x2-mg-hw,(y1+y2)/2],[(x1+x2)/2,(y1+y2)/2]];
+    const steps=6;
+    for(let si=0;si<steps;si++){const t=si/(steps-1);
+      if(isLen)cands.push([(x1+x2)/2,y1+hh+mg+(y2-y1-2*hh-2*mg)*t]);
+      else cands.push([x1+hw+mg+(x2-x1-2*hw-2*mg)*t,(y1+y2)/2]);}
+    let best=null,bestOv=Infinity;
+    for(let[cx,cy] of cands){
+      cx=Math.max(minX,Math.min(maxX,cx));cy=Math.max(minY,Math.min(maxY,cy));
+      const ov=cvUsed.reduce((s,[rx,ry,rw,rh])=>s+(_cvRov(cx,cy,hw,hh,rx,ry,rw,rh)?1:0),0);
+      if(ov===0){best=[cx,cy];break;}if(ov<bestOv){bestOv=ov;best=[cx,cy];}
+    }
+    const[cx,cy]=best||[(x1+x2)/2,(y1+y2)/2];
+    return[Math.max(minX,Math.min(maxX,cx)),Math.max(minY,Math.min(maxY,cy)),hw,hh];
+  }
   res.placed.forEach(p=>{
     const x1=ox+p.x*scale,y1=oy+p.y*scale,bw=p.length*scale,bh=p.width*scale;
     ctx.fillStyle=p.color;ctx.strokeStyle="#444";ctx.lineWidth=.8;
@@ -1598,19 +1649,29 @@ function drawCV(){
     if(bw>22&&bh>15){
       const tc=cc(p.color);
       const fs=Math.max(7,Math.min(15,Math.floor(Math.min(bw/5,bh/2.5))));
-      const fsSmall=Math.max(6,fs-2);
-      // 이름 — 중앙
-      ctx.fillStyle=tc;ctx.font="bold "+fs+"px 맑은 고딕";ctx.textAlign="center";
-      if(p.name)ctx.fillText(p.name,x1+bw/2,y1+bh/2+fs*.35);
-      // 길이 — 상단 중앙 (PC앱 동일)
-      if(bh>28){
-        ctx.font=fsSmall+"px 'Courier New'";ctx.textAlign="center";
-        ctx.fillText(Math.round(p.length),x1+bw/2,y1+fsSmall+2);
+      const fsS=Math.max(6,fs-2);
+      // 이름 — 중앙 (조각 벗어나지 않음)
+      if(p.name){
+        const nw=fs*p.name.length*0.55,nh=fs;
+        const nx=Math.max(x1+nw/2+1,Math.min(x2-nw/2-1,(x1+x2)/2));
+        const ny=Math.max(y1+nh+1,Math.min(y2-2,(y1+y2)/2+fs*.35));
+        ctx.fillStyle=tc;ctx.font="bold "+fs+"px 맑은 고딕";ctx.textAlign="center";
+        ctx.fillText(p.name,nx,ny);
+        cvUsed.push([nx,ny-nh*0.5,nw,nh]);
       }
-      // 폭 — 좌측 중앙 (PC앱 동일)
-      if(bw>45){
-        ctx.font=fsSmall+"px 'Courier New'";ctx.textAlign="left";
-        ctx.fillText(Math.round(p.width),x1+3,y1+bh/2+fsSmall*.35);
+      // 길이 치수 — 내부, 겹침 회피
+      if(bw>28&&bh>20){
+        const[cx,cy,hw,hh]=cvFindPos(x1,y1,x1+bw,y1+bh,true,fsS,scale);
+        ctx.fillStyle=tc;ctx.font=fsS+"px 'Courier New'";ctx.textAlign="center";
+        ctx.fillText(Math.round(p.length),cx,cy+fsS*0.35);
+        cvUsed.push([cx,cy,hw,hh]);
+      }
+      // 폭 치수 — 내부, 겹침 회피
+      if(bh>20&&bw>35){
+        const[cx,cy,hw,hh]=cvFindPos(x1,y1,x1+bw,y1+bh,false,fsS,scale);
+        ctx.fillStyle=tc;ctx.font=fsS+"px 'Courier New'";ctx.textAlign="center";
+        ctx.fillText(Math.round(p.width),cx,cy+fsS*0.35);
+        cvUsed.push([cx,cy,hw,hh]);
       }
     }
   });
@@ -1902,10 +1963,11 @@ function lmToggleLayout(e){
   if(!ctrl||!body)return;
   if(lmLayoutH){
     // 가로: 섹션들을 2열 CSS grid로 재배치
-    ctrl.style.width="520px";ctrl.style.maxWidth="96vw";
+    ctrl.style.width="860px";ctrl.style.maxWidth="96vw";
     body.style.display="grid";
-    body.style.gridTemplateColumns="1fr 1fr";
-    body.style.gap="0";
+    body.style.gridTemplateColumns="1fr 1fr 1fr";  // 3열
+    body.style.gap="0 4px";
+    body.style.alignItems="start";
     if(btn)btn.textContent="⇅ 세로";
   }else{
     // 세로: 원래 block 레이아웃으로 복원
@@ -2069,6 +2131,9 @@ function lmToggleCr(){
 function lmKeyDown(e){
   const mo=document.getElementById("lineMo");
   if(mo.style.display==="none")return;
+  // 슬라이더에 포커스 있을 때 방향키로 이미지 이동 차단
+  const ae=document.activeElement;
+  if(ae&&ae.type==="range")return;
   if(e.key==="ArrowRight"){lmOxStep(+100);}
   else if(e.key==="ArrowLeft"){lmOxStep(-100);}
   else if(e.key==="ArrowUp"){lmState.scale*=1.1;lmDraw();}
@@ -2154,32 +2219,48 @@ function lmDraw(){
   ctx.save();ctx.translate(px1-8,(py1+py2)/2);ctx.rotate(-Math.PI/2);
   ctx.textAlign="center";ctx.fillText(String(Math.round(pWid)),0,0);ctx.restore();
 
-  // ── 조각 그리기 (치수 내부 표기 / 겹침 자동조정) ──
+  // ── 텍스트 크기 슬라이더 읽기 ──
+  const lmNameFSv=parseFloat(document.getElementById("lmNameFS")?.value)||14;
+  const lmDimFSv=parseFloat(document.getElementById("lmDimFS")?.value)||11;
+  const partLW2=parseFloat(document.getElementById("lmPartLW")?.value)||2;
+
+  // ── 겹침 감지/회피 헬퍼 ──────────────────────────────
   const usedDimRects=[];
-  function rectOverlap(ax,ay,aw,ah,bx,by,bw2,bh2){
-    return Math.abs(ax-bx)<aw+bw2&&Math.abs(ay-by)<ah+bh2;
+  function _rOv(ax,ay,aw,ah,bx,by,bw2,bh2){
+    return Math.abs(ax-bx)<(aw+bw2)*0.5&&Math.abs(ay-by)<(ah+bh2)*0.5;
   }
-  function findDimPos(x1,y1,x2,y2,isLen,fsd,margin=4){
+  // 조각 내부에서 겹침 없는 위치 탐색 (격자 탐색으로 강화)
+  function findDimPos(x1,y1,x2,y2,isLen,fsd,margin=3){
     const txt=String(Math.round(isLen?(x2-x1)/sc:(y2-y1)/sc));
-    const hw=fsd*txt.length*0.35+2,hh=fsd*0.65+2;
-    let candidates;
+    const hw=fsd*txt.length*0.32+2,hh=fsd*0.7+2;
+    // 조각 내부 클램프
+    const minX=x1+hw+margin,maxX=x2-hw-margin;
+    const minY=y1+hh+margin,maxY=y2-hh-margin;
+    if(minX>maxX||minY>maxY)return[Math.max(minX,Math.min(maxX,(x1+x2)/2)),Math.max(minY,Math.min(maxY,(y1+y2)/2)),hw,hh];
+    // 후보 위치 (여러 위치 탐색)
+    let cands;
     if(isLen){
-      candidates=[[(x1+x2)/2,y1+margin+hh],[(x1+x2)/2,(y1+y2)/2],[(x1+x2)/2,y2-margin-hh]];
+      cands=[[( x1+x2)/2,y1+margin+hh],[(x1+x2)/2,y2-margin-hh],[(x1+x2)/2,(y1+y2)/2]];
     } else {
-      candidates=[[x1+margin+hw,(y1+y2)/2],[(x1+x2)/2,(y1+y2)/2],[x2-margin-hw,(y1+y2)/2]];
+      cands=[[x1+margin+hw,(y1+y2)/2],[x2-margin-hw,(y1+y2)/2],[(x1+x2)/2,(y1+y2)/2]];
     }
-    let bestPos=candidates[0],bestOv=999;
-    for(let [cx,cy] of candidates){
-      cx=Math.max(x1+hw+margin,Math.min(x2-hw-margin,cx));
-      cy=Math.max(y1+hh+margin,Math.min(y2-hh-margin,cy));
-      const ov=usedDimRects.filter(([rx,ry,rw,rh])=>rectOverlap(cx,cy,hw,hh,rx,ry,rw,rh)).length;
-      if(ov===0)return[cx,cy,hw,hh];
-      if(ov<bestOv){bestOv=ov;bestPos=[cx,cy];}
+    // 격자 탐색: 후보가 겹치면 더 세분화
+    const steps=5;
+    for(let si=0;si<steps;si++){
+      const t=si/(steps-1);
+      if(isLen) cands.push([(x1+x2)/2, y1+hh+margin+(y2-y1-2*hh-2*margin)*t]);
+      else      cands.push([x1+hw+margin+(x2-x1-2*hw-2*margin)*t, (y1+y2)/2]);
     }
-    let[cx,cy]=bestPos;
-    cx=Math.max(x1+hw+margin,Math.min(x2-hw-margin,cx));
-    cy=Math.max(y1+hh+margin,Math.min(y2-hh-margin,cy));
-    return[cx,cy,hw,hh];
+    let best=null,bestOv=Infinity;
+    for(let [cx,cy] of cands){
+      cx=Math.max(minX,Math.min(maxX,cx));
+      cy=Math.max(minY,Math.min(maxY,cy));
+      const ov=usedDimRects.reduce((s,[rx,ry,rw,rh])=>s+(_rOv(cx,cy,hw,hh,rx,ry,rw,rh)?1:0),0);
+      if(ov===0){best=[cx,cy];break;}
+      if(ov<bestOv){bestOv=ov;best=[cx,cy];}
+    }
+    const[cx,cy]=best||[(x1+x2)/2,(y1+y2)/2];
+    return[Math.max(minX,Math.min(maxX,cx)),Math.max(minY,Math.min(maxY,cy)),hw,hh];
   }
 
   placed.forEach((p,i)=>{
@@ -2190,30 +2271,32 @@ function lmDraw(){
     const bw=bx2-bx1,bh=by2-by1;
     const partLc=lmState.colorRotate?LM_CR_PALETTE[i%LM_CR_PALETTE.length]:lc;
 
-    const partLW=parseFloat(document.getElementById("lmPartLW")?.value)||2;
-    // 조각 라인은 항상 원자재/그리드 위에 그려짐 (겹침 시 조각 우선)
-    ctx.strokeStyle=partLc;ctx.lineWidth=isFocus?partLW*2:partLW;
+    // 조각 라인 (항상 원자재/그리드 위 — 겹침 시 조각 우선)
+    ctx.strokeStyle=partLc;ctx.lineWidth=isFocus?partLW2*2:partLW2;
     ctx.setLineDash([]);ctx.strokeRect(bx1,by1,bw,bh);
 
-    // 이름 — 조각 중앙
+    // 이름 — 조각 중앙 (텍스트 크기 슬라이더 반영, 조각 벗어나지 않음)
     if(bw>24&&bh>14&&p.name){
-      const fsN=Math.max(7,Math.min(20,Math.floor(Math.min(bw/5,bh/3))));
+      const fsN=Math.max(7,Math.min(lmNameFSv,Math.floor(Math.min(bw/4,bh/2.5))));
+      const nameW=fsN*p.name.length*0.55,nameH=fsN;
+      const nx=Math.max(bx1+nameW/2+2,Math.min(bx2-nameW/2-2,(bx1+bx2)/2));
+      const ny=Math.max(by1+nameH+2,Math.min(by2-2,(by1+by2)/2+fsN*0.35));
       ctx.fillStyle=partLc;ctx.textAlign="center";ctx.font=`bold ${fsN}px 맑은 고딕`;
-      ctx.fillText(p.name,(bx1+bx2)/2,(by1+by2)/2);
-      usedDimRects.push([(bx1+bx2)/2,(by1+by2)/2,fsN*p.name.length*0.35+2,fsN*0.65+2]);
+      ctx.fillText(p.name,nx,ny);
+      usedDimRects.push([nx,ny-fsN*0.5,nameW,nameH]);
     }
 
-    // 길이 치수 (조각 내부)
+    // 길이 치수 — 조각 내부, 겹침 자동 회피
     if(bw>28){
-      const fsd=Math.max(6,Math.min(13,Math.floor(bw/9)));
+      const fsd=Math.max(5,Math.min(lmDimFSv,Math.floor(bw/8)));
       const[cx,cy,hw,hh]=findDimPos(bx1,by1,bx2,by2,true,fsd);
       ctx.fillStyle=partLc;ctx.textAlign="center";ctx.font=`${fsd}px Courier New`;
       ctx.fillText(String(Math.round(p.length)),cx,cy+fsd*0.35);
       usedDimRects.push([cx,cy,hw,hh]);
     }
-    // 폭 치수 (조각 내부)
+    // 폭 치수 — 조각 내부, 겹침 자동 회피
     if(bh>18){
-      const fsd=Math.max(6,Math.min(13,Math.floor(bh/5)));
+      const fsd=Math.max(5,Math.min(lmDimFSv,Math.floor(bh/4)));
       const[cx,cy,hw,hh]=findDimPos(bx1,by1,bx2,by2,false,fsd);
       ctx.fillStyle=partLc;ctx.textAlign="center";ctx.font=`${fsd}px Courier New`;
       ctx.fillText(String(Math.round(p.width)),cx,cy+fsd*0.35);
