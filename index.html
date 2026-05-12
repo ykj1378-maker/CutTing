@@ -24,32 +24,6 @@ async function _sha256(str){
 }
 window._sha256=_sha256;
 
-/* === AES-GCM 암호화/복호화 === */
-async function _aesKey(password){
-  const enc=new TextEncoder();
-  const km=await crypto.subtle.importKey("raw",enc.encode(password),"PBKDF2",false,["deriveKey"]);
-  return crypto.subtle.deriveKey(
-    {name:"PBKDF2",salt:enc.encode("gist-token-salt-v1"),iterations:100000,hash:"SHA-256"},
-    km,{name:"AES-GCM",length:256},false,["encrypt","decrypt"]
-  );
-}
-async function encryptToken(token,password){
-  const enc=new TextEncoder();
-  const key=await _aesKey(password);
-  const iv=crypto.getRandomValues(new Uint8Array(12));
-  const encrypted=await crypto.subtle.encrypt({name:"AES-GCM",iv},key,enc.encode(token));
-  const buf=new Uint8Array(12+encrypted.byteLength);
-  buf.set(iv,0);buf.set(new Uint8Array(encrypted),12);
-  return btoa(String.fromCharCode(...buf));
-}
-async function decryptToken(b64,password){
-  const buf=Uint8Array.from(atob(b64),c=>c.charCodeAt(0));
-  const key=await _aesKey(password);
-  const dec=await crypto.subtle.decrypt({name:"AES-GCM",iv:buf.slice(0,12)},key,buf.slice(12));
-  return new TextDecoder().decode(dec);
-}
-window.encryptToken=encryptToken;
-window.decryptToken=decryptToken;
 </script>
 
 <script type="module">
@@ -87,8 +61,8 @@ window._fbListBackups=async()=>{try{const q=query(collection(db,CO),orderBy("sav
 window._fbLoadBackup=async id=>{try{const s=await getDoc(doc(db,CO,id));if(s.exists())return{ok:true,data:JSON.parse(s.data().payload)};return{ok:false};}catch{return{ok:false};}};
 window._fbReady=true;
 
-/* === GitHub 토큰 암호화 저장/불러오기 (Firebase) === */
-window._fbSaveGistToken=async(encryptedToken)=>{
+/* === GitHub 토큰 저장/불러오기 (Firebase) === */
+window._fbSaveGistToken=async(token)=>{
   try{await setDoc(doc(db,UC,"gist_token"),{token:encryptedToken,savedAt:new Date().toISOString()});return true;}
   catch(e){console.error("fbSaveGistToken:",e);return false;}
 };
@@ -2612,60 +2586,39 @@ async function saveGistSettings(){
   const gid=document.getElementById("gistId").value.trim();
   if(!uid||!rawToken){toast("아이디와 토큰을 입력하세요");return;}
   const st=document.getElementById("gistStatus");
-
-  /* 마스킹 문자열이 그대로 들어오면 기존 토큰 유지 (새 토큰 입력 안 한 경우) */
+  localStorage.setItem("gist_uid",uid);
+  localStorage.setItem("gist_id",gid);
+  /* 마스킹 문자열이면 기존 토큰 유지 */
   if(rawToken.startsWith("●")){
-    localStorage.setItem("gist_uid",uid);
-    localStorage.setItem("gist_id",gid);
-    st.textContent="✅ 아이디/Gist ID 저장됨 (토큰은 기존 유지)";
+    st.textContent="✅ 설정 저장됨 (토큰 기존 유지)";
     toast("✅ 설정 저장됨");
     return;
   }
-  const token=rawToken;
-
-  /* uid/gid는 로컬에 저장 (민감정보 아님) */
-  localStorage.setItem("gist_uid",uid);
-  localStorage.setItem("gist_id",gid);
-  /* 토큰은 로컬에서 제거 후 Firebase에 암호화 저장 */
+  /* 새 토큰 → Firebase에 직접 저장 + 세션 캐시 */
   localStorage.removeItem("gist_token");
-
-  if(!CU){toast("로그인 후 시도하세요");return;}
-  st.textContent="🔐 토큰 암호화 저장 중...";
-  try{
-    const encKey=uid+"_cutting_s_2024";
-    const encrypted=await encryptToken(token,encKey);
-    const ok=await window._fbSaveGistToken(encrypted);
-    if(ok){
-      st.textContent="✅ 토큰이 Firebase에 암호화 저장되었습니다.";
-      toast("✅ GitHub Gists 설정 저장됨");
-      /* 세션 캐시에만 평문 보관 (새로고침 시 사라짐) */
-      window._gistTokenCache=token;
-    } else {
-      st.textContent="❌ Firebase 저장 실패 — 로컬에 임시 저장합니다.";
-      localStorage.setItem("gist_token",token);
-    }
-  }catch(e){
-    st.textContent="❌ 암호화 오류: "+e.message;
-    localStorage.setItem("gist_token",token);
+  if(!window._fbReady){toast("Firebase 연결 중...");return;}
+  st.textContent="💾 토큰 저장 중...";
+  const ok=await window._fbSaveGistToken(rawToken);
+  if(ok){
+    window._gistTokenCache=rawToken;
+    st.textContent="✅ 토큰이 저장되었습니다.";
+    toast("✅ GitHub Gists 설정 저장됨");
+  } else {
+    st.textContent="❌ Firebase 저장 실패";
+    toast("❌ 저장 실패");
   }
 }
 async function _getGistToken(){
   /* 1순위: 세션 캐시 */
   if(window._gistTokenCache)return window._gistTokenCache;
-  /* 2순위: Firebase 복호화 */
-  const uid=localStorage.getItem("gist_uid")||"";
-  if(uid&&window._fbReady){
+  /* 2순위: Firebase에서 직접 불러오기 */
+  if(window._fbReady){
     try{
-      const enc=await window._fbLoadGistToken();
-      if(enc){
-        const encKey=uid+"_cutting_s_2024";
-        const token=await decryptToken(enc,encKey);
-        window._gistTokenCache=token;
-        return token;
-      }
+      const token=await window._fbLoadGistToken();
+      if(token){window._gistTokenCache=token;return token;}
     }catch(e){}
   }
-  /* 3순위: 구버전 로컬스토리지 (마이그레이션용) */
+  /* 3순위: 구버전 로컬스토리지 */
   return localStorage.getItem("gist_token")||"";
 }
 
