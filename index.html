@@ -695,6 +695,15 @@ function fd(mm){
 }
 // 패널 치수 표시: 입력된 mm값 그대로 표시 (m 변환 없음)
 // 예: 10000 → "10000mm", 1220 → "1220mm"
+// 조각 표시명: 원자재이름-(조각이름) 형식
+function partLabel(panelName, partName){
+  const pn=(panelName||"").trim();
+  const pt=(partName||"").trim();
+  if(pn&&pt) return pn+"-("+pt+")";
+  if(pt) return pt;
+  if(pn) return pn;
+  return "";
+}
 function fdPanel(mm){
   const v=parseFloat(mm)||0;
   if(v<=0)return "?";
@@ -1591,11 +1600,13 @@ function drawCV(){
   const ox=(cw-panel.length*scale)/2+cvX,oy=(ch-panel.width*scale)/2+cvY+15;
   ctx.fillStyle="#FFF";ctx.strokeStyle="#495057";ctx.lineWidth=1.5;
   ctx.fillRect(ox,oy,panel.length*scale,panel.width*scale);ctx.strokeRect(ox,oy,panel.length*scale,panel.width*scale);
-  // ── 패널 치수: 입력값 그대로 mm 표시 ──
+  // ── 패널 치수: 치수(mm) + 원자재이름 표시 ──
   ctx.save();
   ctx.fillStyle="#495057";ctx.font="bold 13px 맑은 고딕";
   ctx.textAlign="center";ctx.textBaseline="bottom";
-  ctx.fillText(fdPanel(panel.length),ox+panel.length*scale/2,oy-2);
+  // 길이: "치수(mm) 원자재이름"
+  const cvPanelLabel=fdPanel(panel.length)+(panel.name?" "+panel.name:"");
+  ctx.fillText(cvPanelLabel,ox+panel.length*scale/2,oy-2);
   ctx.textAlign="right";ctx.textBaseline="middle";
   ctx.fillText(fdPanel(panel.width),ox-4,oy+panel.width*scale/2);
   ctx.restore();
@@ -1650,13 +1661,15 @@ function drawCV(){
       const tc=cc(p.color);
       const fs=Math.max(7,Math.min(15,Math.floor(Math.min(bw/5,bh/2.5))));
       const fsS=Math.max(6,fs-2);
-      // 이름 — 중앙 (조각 벗어나지 않음)
-      if(p.name){
-        const nw=fs*p.name.length*0.55,nh=fs;
-        const nx=Math.max(x1+nw/2+1,Math.min(x2-nw/2-1,(x1+x2)/2));
-        const ny=Math.max(y1+nh+1,Math.min(y2-2,(y1+y2)/2+fs*.35));
-        ctx.fillStyle=tc;ctx.font="bold "+fs+"px 맑은 고딕";ctx.textAlign="center";
-        ctx.fillText(p.name,nx,ny);
+      // 이름 — 중앙 (x2 버그 수정: x1+bw 사용, partLabel 적용)
+      const cvLabel=partLabel(panel.name,p.name);
+      if(cvLabel){
+        const dispFS=Math.max(7,Math.min(fs,Math.floor(Math.min(bw/(cvLabel.length*0.6+1),bh/2.5))));
+        const nw=dispFS*cvLabel.length*0.55+2,nh=dispFS;
+        const nx=Math.max(x1+nw/2+1,Math.min(x1+bw-nw/2-1,(x1+x1+bw)/2));
+        const ny=Math.max(y1+nh+1,Math.min(y1+bh-2,(y1+y1+bh)/2+dispFS*.35));
+        ctx.fillStyle=tc;ctx.font="bold "+dispFS+"px 맑은 고딕";ctx.textAlign="center";
+        ctx.fillText(cvLabel,nx,ny);
         cvUsed.push([nx,ny-nh*0.5,nw,nh]);
       }
       // 길이 치수 — 내부, 겹침 회피
@@ -1797,7 +1810,9 @@ function drawFull(){
   fctx.save();
   fctx.fillStyle="#495057";fctx.font="bold 14px 맑은 고딕";
   fctx.textAlign="center";fctx.textBaseline="bottom";
-  fctx.fillText(fdPanel(panel.length),ox+panel.length*scale/2,oy-2);
+  // 길이: "치수(mm) 원자재이름"
+  const fullPanelLabel=fdPanel(panel.length)+(panel.name?" "+panel.name:"");
+  fctx.fillText(fullPanelLabel,ox+panel.length*scale/2,oy-2);
   fctx.textAlign="right";fctx.textBaseline="middle";
   fctx.fillText(fdPanel(panel.width),ox-6,oy+panel.width*scale/2);
   fctx.restore();
@@ -1826,22 +1841,54 @@ function drawFull(){
       fctx.strokeStyle=p.color;fctx.lineWidth=1.8;fctx.strokeRect(x1,y1,bw,bh);
       if(bw>20&&bh>14){
         const fs=Math.max(7,Math.min(15,Math.floor(Math.min(bw/5,bh/3))));
+        const flLabel=partLabel(panel.name,p.name);
         fctx.fillStyle=p.color;fctx.textAlign="center";
-        if(p.name){fctx.font=`bold ${fs}px 맑은 고딕`;fctx.fillText(p.name,x1+bw/2,y1+bh/2+fs*.35);}
+        if(flLabel){
+          const dispFS=Math.max(7,Math.min(fs,Math.floor(Math.min(bw/(flLabel.length*0.6+1),bh/3))));
+          fctx.font=`bold ${dispFS}px 맑은 고딕`;
+          fctx.fillText(flLabel,x1+bw/2,y1+bh/2+dispFS*.35);
+        }
         if(bh>32){fctx.font=Math.max(6,fs-2)+"px 'Courier New'";fctx.fillText(Math.round(p.length)+"×"+Math.round(p.width),x1+bw/2,y1+bh/2-fs*.8);}
       }
     } else {
-      // Normal Mode: 채우기 + 윤곽선 + 텍스트 (크게)
+      // Normal Mode: 채우기 + 윤곽선 + 텍스트 (겹침 자동회피)
       fctx.fillStyle=p.color;fctx.strokeStyle="#444";fctx.lineWidth=.8;
       fctx.fillRect(x1,y1,bw,bh);fctx.strokeRect(x1,y1,bw,bh);
       if(bw>22&&bh>15){
         const tc=cc(p.color);
         const fs=Math.max(8,Math.min(16,Math.floor(Math.min(bw/5,bh/2.5))));
-        const fsSmall=Math.max(7,fs-2);
-        fctx.fillStyle=tc;fctx.font="bold "+fs+"px 맑은 고딕";fctx.textAlign="center";
-        if(p.name)fctx.fillText(p.name,x1+bw/2,y1+bh/2+fs*.35);
-        if(bh>30){fctx.font=fsSmall+"px 'Courier New'";fctx.textAlign="center";fctx.fillText(Math.round(p.length),x1+bw/2,y1+fsSmall+2);}
-        if(bw>50){fctx.font=fsSmall+"px 'Courier New'";fctx.textAlign="left";fctx.fillText(Math.round(p.width),x1+3,y1+bh/2+fsSmall*.35);}
+        const fsS=Math.max(7,fs-2);
+        const fullLabel=partLabel(panel.name,p.name);
+        const fUsed=[];
+        function _fRov(ax,ay,aw,ah,bx2,by2,bw3,bh3){return Math.abs(ax-bx2)<(aw+bw3)*0.5&&Math.abs(ay-by2)<(ah+bh3)*0.5;}
+        function fFindPos(lx1,ly1,lx2,ly2,isLen,fsd){
+          const txt=String(Math.round(isLen?(lx2-lx1)/scale:(ly2-ly1)/scale));
+          const hw=fsd*txt.length*0.32+2,hh=fsd*0.7+2;
+          const mg=2,minX=lx1+hw+mg,maxX=lx2-hw-mg,minY=ly1+hh+mg,maxY=ly2-hh-mg;
+          if(minX>maxX||minY>maxY)return[(lx1+lx2)/2,(ly1+ly2)/2,hw,hh];
+          let cands=isLen?[[(lx1+lx2)/2,ly1+mg+hh],[(lx1+lx2)/2,ly2-mg-hh],[(lx1+lx2)/2,(ly1+ly2)/2]]
+                        :[[ lx1+mg+hw,(ly1+ly2)/2],[lx2-mg-hw,(ly1+ly2)/2],[(lx1+lx2)/2,(ly1+ly2)/2]];
+          let best=null,bestOv=Infinity;
+          for(let[cx,cy] of cands){
+            cx=Math.max(minX,Math.min(maxX,cx));cy=Math.max(minY,Math.min(maxY,cy));
+            const ov=fUsed.reduce((s,[rx,ry,rw,rh])=>s+(_fRov(cx,cy,hw,hh,rx,ry,rw,rh)?1:0),0);
+            if(ov===0){best=[cx,cy];break;}if(ov<bestOv){bestOv=ov;best=[cx,cy];}
+          }
+          const[cx,cy]=best||[(lx1+lx2)/2,(ly1+ly2)/2];
+          return[Math.max(minX,Math.min(maxX,cx)),Math.max(minY,Math.min(maxY,cy)),hw,hh];
+        }
+        // 이름
+        if(fullLabel){
+          const dispFS=Math.max(7,Math.min(fs,Math.floor(Math.min(bw/(fullLabel.length*0.6+1),bh/2.5))));
+          const nw=dispFS*fullLabel.length*0.55+2,nh=dispFS;
+          const nx=Math.max(x1+nw/2+1,Math.min(x1+bw-nw/2-1,(x1+x1+bw)/2));
+          const ny=Math.max(y1+nh+1,Math.min(y1+bh-2,(y1+y1+bh)/2+dispFS*.35));
+          fctx.fillStyle=tc;fctx.font="bold "+dispFS+"px 맑은 고딕";fctx.textAlign="center";
+          fctx.fillText(fullLabel,nx,ny);
+          fUsed.push([nx,ny-nh*0.5,nw,nh]);
+        }
+        if(bh>30){const[cx,cy,hw,hh]=fFindPos(x1,y1,x1+bw,y1+bh,true,fsS);fctx.font=fsS+"px 'Courier New'";fctx.fillStyle=tc;fctx.textAlign="center";fctx.fillText(Math.round(p.length),cx,cy+fsS*0.35);fUsed.push([cx,cy,hw,hh]);}
+        if(bw>50){const[cx,cy,hw,hh]=fFindPos(x1,y1,x1+bw,y1+bh,false,fsS);fctx.font=fsS+"px 'Courier New'";fctx.fillStyle=tc;fctx.textAlign="center";fctx.fillText(Math.round(p.width),cx,cy+fsS*0.35);fUsed.push([cx,cy,hw,hh]);}
       }
     }
   });
@@ -2275,14 +2322,15 @@ function lmDraw(){
     ctx.strokeStyle=partLc;ctx.lineWidth=isFocus?partLW2*2:partLW2;
     ctx.setLineDash([]);ctx.strokeRect(bx1,by1,bw,bh);
 
-    // 이름 — 조각 중앙 (텍스트 크기 슬라이더 반영, 조각 벗어나지 않음)
-    if(bw>24&&bh>14&&p.name){
-      const fsN=Math.max(7,Math.min(lmNameFSv,Math.floor(Math.min(bw/4,bh/2.5))));
-      const nameW=fsN*p.name.length*0.55,nameH=fsN;
+    // 이름 — partLabel 형식: "원자재이름-(조각이름)"
+    const lmLabel=partLabel(panel.name,p.name);
+    if(bw>24&&bh>14&&lmLabel){
+      const fsN=Math.max(7,Math.min(lmNameFSv,Math.floor(Math.min(bw/(lmLabel.length*0.6+1),bh/2.5))));
+      const nameW=fsN*lmLabel.length*0.55+2,nameH=fsN;
       const nx=Math.max(bx1+nameW/2+2,Math.min(bx2-nameW/2-2,(bx1+bx2)/2));
       const ny=Math.max(by1+nameH+2,Math.min(by2-2,(by1+by2)/2+fsN*0.35));
       ctx.fillStyle=partLc;ctx.textAlign="center";ctx.font=`bold ${fsN}px 맑은 고딕`;
-      ctx.fillText(p.name,nx,ny);
+      ctx.fillText(lmLabel,nx,ny);
       usedDimRects.push([nx,ny-fsN*0.5,nameW,nameH]);
     }
 
