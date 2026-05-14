@@ -101,10 +101,16 @@ async function _deobfuscate(encoded, user){
 /* 단일 사용자 해시 조회 */
 window._fbGetUserHash=async(uid)=>{
   try{
+    const docPath=UC+"/"+pwDocId(uid);
+    console.log("[LOGIN DEBUG] 조회 경로:", docPath);
     const s=await getDoc(doc(db,UC,pwDocId(uid)));
+    console.log("[LOGIN DEBUG] 문서 존재:", s.exists(), "| 데이터:", s.exists()?JSON.stringify(s.data()):"(없음)");
     if(s.exists()) return s.data().pwHash||null;
     return null;
-  }catch(e){console.error("fbGetUserHash:",e);return null;}
+  }catch(e){
+    console.error("[LOGIN DEBUG] fbGetUserHash 오류:", e.code, e.message);
+    return null;
+  }
 };
 
 /* 단일 사용자 저장/업데이트 */
@@ -1468,11 +1474,14 @@ async function doLogin(){
 
   /* 입력 비밀번호 SHA-256 변환 — window._sha256 은 항상 module 초기화 때 등록됨 */
   const pwHash = await window._sha256(pwd);
+  console.log("[LOGIN DEBUG] 입력 pwHash:", pwHash);
 
   /* 해당 사용자 해시만 조회 */
   let storedHash = null;
   try{
     storedHash = await window._fbGetUserHash(uid);
+    console.log("[LOGIN DEBUG] storedHash:", storedHash);
+    console.log("[LOGIN DEBUG] 일치 여부:", storedHash === pwHash);
   }catch(e){
     console.error("doLogin: 해시 조회 실패",e);
     showLE("서버 오류가 발생했습니다. Firebase 보안 규칙을 확인하거나 새로고침 후 다시 시도하세요.");
