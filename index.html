@@ -16,7 +16,7 @@
 <title>cutting_s</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<!-- SHA-256: 반드시 Firebase module보다 먼저 로드 -->
+<!-- SHA-256: window 전역 등록 (module script 보다 먼저 파싱되도록 일반 script 유지) -->
 <script>
 async function _sha256(str){
   const buf=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(str));
@@ -28,31 +28,39 @@ window._sha256=_sha256;
 <script type="module">
 import{initializeApp}from"https://www.gstatic.com/firebasejs/10.12.1/firebase-app.js";
 import{getFirestore,doc,setDoc,getDoc,collection,getDocs,orderBy,query,limit,deleteDoc}from"https://www.gstatic.com/firebasejs/10.12.1/firebase-firestore.js";
+
+/* ── module 내부에서 직접 사용할 sha256 함수 (window 참조 타이밍 문제 방지) ── */
+async function sha256(str){
+  const buf=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,"0")).join("");
+}
+/* window._sha256 도 동일 함수로 덮어써서 전역/모듈 양쪽 모두 동일하게 동작 */
+window._sha256=sha256;
+
 /*
- * ⚠️ Firebase 설정 안내
- * API 키는 Firebase 클라이언트 SDK 특성상 브라우저에 노출됩니다.
- * 아래 Firebase Console에서 반드시 Firestore 보안 규칙을 설정하세요:
+ * ⚠️ Firebase Console → Firestore → 규칙 탭에 아래 규칙을 적용하세요.
+ *    (기존 주석의 if false 규칙은 로그인 차단을 유발하므로 반드시 교체)
  *
  * rules_version = '2';
  * service cloud.firestore {
  *   match /databases/{database}/documents {
- *     // cutting_users: 계정 문서 — 해당 UID 문서만 접근 허용
- *     match /cutting_users/pw_{userId} {
- *       allow read, write: if false; // 서버(Admin SDK)만 접근 — 클라이언트 차단
+ *
+ *     // 계정 문서 (pw_*, gi_*, _migrated_v2 등): 읽기·쓰기 모두 허용
+ *     // ※ 커스텀 SHA-256 인증 구조상 클라이언트가 직접 읽어야 로그인 가능
+ *     match /cutting_users/{document} {
+ *       allow read, write: if true;
  *     }
- *     match /cutting_users/{doc} {
- *       allow read, write: if false; // gist_ 등 민감 문서 클라이언트 차단
- *     }
+ *
  *     // 프로젝트 데이터: 사용자별 독립 컬렉션
  *     match /cutting_projects_u_{userId}/{document=**} {
- *       allow read, write: if true; // 현재 커스텀 인증 — 최소한 컬렉션명으로 분리
+ *       allow read, write: if true;
  *     }
  *   }
  * }
  *
- * 참고: 현재 구조는 커스텀 인증(SHA-256)을 사용하므로 Firebase Auth 없이
- * Rules에서 request.auth를 쓸 수 없습니다. 보안 강화를 위해
- * Firebase Anonymous Auth 또는 Custom Token 도입을 권장합니다.
+ * 참고: Firebase Auth 없이 커스텀 인증(SHA-256)을 사용하므로
+ * Rules에서 request.auth 를 활용할 수 없습니다.
+ * 보안 강화가 필요하다면 Firebase Anonymous Auth 또는 Custom Token 도입을 권장합니다.
  */
 const C={apiKey:"AIzaSyARK0Ku1EZDgzPV1F0JZKWmQ0jMDfBysqM",authDomain:"bitna-17ed3.firebaseapp.com",projectId:"bitna-17ed3",storageBucket:"bitna-17ed3.firebasestorage.app",messagingSenderId:"798709646035",appId:"1:798709646035:web:dd06dd5b66a339cd894a26"};
 const app=initializeApp(C),db=getFirestore(app),UC="cutting_users";
@@ -67,16 +75,17 @@ function gistDocId(user){return"gi_"+user;}
 
 /* ── 간단 XOR 난독화 (Gist 토큰 평문 저장 방지) ─────────────────────
    완전한 암호화는 아니지만 Firebase 콘솔에서 토큰이 직접 보이지 않게 합니다.
-   키는 프로젝트 ID + 사용자명으로 생성합니다. */
+   키는 프로젝트 ID + 사용자명으로 생성합니다.
+   ※ module 내부 sha256() 직접 사용 — window 타이밍 무관 */
 async function _obfuscate(text, user){
-  const key = await window._sha256(C.projectId + "_" + user);
+  const key = await sha256(C.projectId + "_" + user);
   const enc = [];
   for(let i=0;i<text.length;i++) enc.push(text.charCodeAt(i) ^ key.charCodeAt(i % key.length));
   return btoa(String.fromCharCode(...enc));
 }
 async function _deobfuscate(encoded, user){
   try{
-    const key = await window._sha256(C.projectId + "_" + user);
+    const key = await sha256(C.projectId + "_" + user);
     const raw = atob(encoded);
     let dec = "";
     for(let i=0;i<raw.length;i++) dec += String.fromCharCode(raw.charCodeAt(i) ^ key.charCodeAt(i % key.length));
@@ -117,25 +126,59 @@ window._fbDeleteUser=async(uid)=>{
 };
 
 /* 하위 호환: 기존 accounts 통합 문서 → 개별 문서로 마이그레이션
-   최초 1회만 실행하고 이후에는 건너뜁니다. */
+   최초 1회만 실행하고 이후에는 건너뜁니다.
+   ※ Firestore 쓰기가 실패해도 _fbReady=true 는 반드시 설정됩니다.
+      (쓰기 실패 = 보안 규칙 차단일 가능성 — 규칙 수정 후 새로고침으로 재시도) */
 window._fbMigrateAccounts=async()=>{
   try{
-    const migFlagDoc=await getDoc(doc(db,UC,"_migrated_v2"));
+    /* ① 마이그레이션 완료 플래그 확인 */
+    let migFlagDoc;
+    try{ migFlagDoc=await getDoc(doc(db,UC,"_migrated_v2")); }
+    catch(e){
+      console.warn("fbMigrateAccounts: _migrated_v2 읽기 실패 →",e.code||e.message,
+        "\n→ Firebase Console에서 cutting_users 컬렉션 읽기 규칙을 allow read: if true; 로 설정하세요.");
+      return; // 읽기 자체가 막혀 있으면 더 진행해도 의미 없음
+    }
     if(migFlagDoc.exists()) return; // 이미 마이그레이션 완료
-    const old=await getDoc(doc(db,UC,"accounts"));
-    if(old.exists()){
+
+    /* ② 구버전 accounts 통합 문서 마이그레이션 or 최초 설치 기본 계정 생성 */
+    let old;
+    try{ old=await getDoc(doc(db,UC,"accounts")); }
+    catch(e){ old=null; }
+
+    if(old&&old.exists()){
       const list=old.data().list||{};
       for(const [uid,pwHash] of Object.entries(list)){
-        await setDoc(doc(db,UC,pwDocId(uid)),{pwHash,updatedAt:new Date().toISOString()});
+        try{
+          await setDoc(doc(db,UC,pwDocId(uid)),{pwHash,updatedAt:new Date().toISOString()});
+        }catch(e){
+          console.warn(`fbMigrateAccounts: '${uid}' 계정 마이그레이션 쓰기 실패 →`,e.code||e.message);
+        }
       }
     } else {
-      // 최초 설치: 기본 계정(12345) 생성
-      const h=await window._sha256("12345");
-      await setDoc(doc(db,UC,pwDocId("12345")),{pwHash:h,updatedAt:new Date().toISOString()});
+      /* 최초 설치: 기본 계정 12345 / 12345 생성
+         ※ sha256() 은 module 내부 함수를 직접 호출 — window 타이밍 무관 */
+      try{
+        const h=await sha256("12345");
+        await setDoc(doc(db,UC,pwDocId("12345")),{pwHash:h,updatedAt:new Date().toISOString()});
+        console.log("fbMigrateAccounts: 기본 계정(12345) 생성 완료");
+      }catch(e){
+        console.warn("fbMigrateAccounts: 기본 계정 쓰기 실패 →",e.code||e.message,
+          "\n→ Firebase Console에서 cutting_users 컬렉션 쓰기 규칙을 allow write: if true; 로 설정하세요.");
+        return; // 플래그도 쓰지 않음 → 다음 새로고침 때 재시도
+      }
     }
-    // 마이그레이션 완료 플래그
-    await setDoc(doc(db,UC,"_migrated_v2"),{at:new Date().toISOString()});
-  }catch(e){console.error("fbMigrateAccounts:",e);}
+
+    /* ③ 마이그레이션 완료 플래그 저장 */
+    try{
+      await setDoc(doc(db,UC,"_migrated_v2"),{at:new Date().toISOString()});
+    }catch(e){
+      console.warn("fbMigrateAccounts: 완료 플래그 쓰기 실패 →",e.code||e.message);
+      /* 플래그 저장 실패해도 계정은 이미 생성됐으므로 진행 가능 */
+    }
+  }catch(e){
+    console.error("fbMigrateAccounts 예외:",e);
+  }
 };
 
 /* ── 프로젝트 저장/불러오기 (사용자별 독립 컬렉션 + 독립 문서명) ── */
@@ -1415,25 +1458,48 @@ async function doLogin(){
   }
 
   const btn=document.getElementById("lBtn");btn.textContent="확인 중...";btn.disabled=true;
-  let w=0;while(!window._fbReady&&w<40){await new Promise(r=>setTimeout(r,100));w++;}
-  if(!window._fbReady){showLE("서버 연결 실패. 새로고침 후 시도하세요.");btn.textContent="로그인";btn.disabled=false;return;}
 
-  /* 해당 사용자 해시만 조회 (전체 목록 조회 불필요) */
-  const storedHash = await window._fbGetUserHash(uid);
+  /* Firebase 준비 최대 6초(60회×100ms) 대기 */
+  let w=0;while(!window._fbReady&&w<60){await new Promise(r=>setTimeout(r,100));w++;}
+  if(!window._fbReady){
+    showLE("서버 연결 실패. 네트워크를 확인하고 새로고침 후 다시 시도하세요.");
+    btn.textContent="로그인";btn.disabled=false;return;
+  }
 
-  /* 입력 비밀번호 SHA-256 변환 */
-  const pwHash = window._sha256 ? await window._sha256(pwd) : pwd;
+  /* 입력 비밀번호 SHA-256 변환 — window._sha256 은 항상 module 초기화 때 등록됨 */
+  const pwHash = await window._sha256(pwd);
+
+  /* 해당 사용자 해시만 조회 */
+  let storedHash = null;
+  try{
+    storedHash = await window._fbGetUserHash(uid);
+  }catch(e){
+    console.error("doLogin: 해시 조회 실패",e);
+    showLE("서버 오류가 발생했습니다. Firebase 보안 규칙을 확인하거나 새로고침 후 다시 시도하세요.");
+    btn.textContent="로그인";btn.disabled=false;return;
+  }
+
+  /* Firestore에 계정이 없는 경우 — 규칙 차단 or 계정 미생성 */
+  if(storedHash===null){
+    _loginFail.count++;
+    if(_loginFail.count>=_LOGIN_MAX){
+      _loginFail.lockedUntil=Date.now()+_LOGIN_LOCK_MS;
+      showLE(`로그인 ${_LOGIN_MAX}회 실패. 1분간 잠깁니다.`);
+    } else {
+      showLE(`아이디 또는 비밀번호가 일치하지 않습니다. (${_loginFail.count}/${_LOGIN_MAX})`);
+    }
+    btn.textContent="로그인";btn.disabled=false;return;
+  }
 
   let matched = false;
-  if(storedHash){
-    if(storedHash.length === 64){
-      matched = storedHash === pwHash;
-    } else {
-      /* 평문 계정 자동 마이그레이션 (구버전 호환) */
-      if(storedHash === pwd){
-        matched = true;
-        await window._fbUpsertUser(uid, pwHash);
-      }
+  if(storedHash.length === 64){
+    /* SHA-256 해시 비교 */
+    matched = storedHash === pwHash;
+  } else {
+    /* 평문 계정 자동 마이그레이션 (구버전 호환) */
+    if(storedHash === pwd){
+      matched = true;
+      await window._fbUpsertUser(uid, pwHash);
     }
   }
 
