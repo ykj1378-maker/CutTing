@@ -27,46 +27,183 @@ window._sha256=_sha256;
 
 <script type="module">
 import{initializeApp}from"https://www.gstatic.com/firebasejs/10.12.1/firebase-app.js";
-import{getFirestore,doc,setDoc,getDoc,collection,getDocs,orderBy,query,limit}from"https://www.gstatic.com/firebasejs/10.12.1/firebase-firestore.js";
+import{getFirestore,doc,setDoc,getDoc,collection,getDocs,orderBy,query,limit,deleteDoc}from"https://www.gstatic.com/firebasejs/10.12.1/firebase-firestore.js";
+/*
+ * ⚠️ Firebase 설정 안내
+ * API 키는 Firebase 클라이언트 SDK 특성상 브라우저에 노출됩니다.
+ * 아래 Firebase Console에서 반드시 Firestore 보안 규칙을 설정하세요:
+ *
+ * rules_version = '2';
+ * service cloud.firestore {
+ *   match /databases/{database}/documents {
+ *     // cutting_users: 계정 문서 — 해당 UID 문서만 접근 허용
+ *     match /cutting_users/pw_{userId} {
+ *       allow read, write: if false; // 서버(Admin SDK)만 접근 — 클라이언트 차단
+ *     }
+ *     match /cutting_users/{doc} {
+ *       allow read, write: if false; // gist_ 등 민감 문서 클라이언트 차단
+ *     }
+ *     // 프로젝트 데이터: 사용자별 독립 컬렉션
+ *     match /cutting_projects_u_{userId}/{document=**} {
+ *       allow read, write: if true; // 현재 커스텀 인증 — 최소한 컬렉션명으로 분리
+ *     }
+ *   }
+ * }
+ *
+ * 참고: 현재 구조는 커스텀 인증(SHA-256)을 사용하므로 Firebase Auth 없이
+ * Rules에서 request.auth를 쓸 수 없습니다. 보안 강화를 위해
+ * Firebase Anonymous Auth 또는 Custom Token 도입을 권장합니다.
+ */
 const C={apiKey:"AIzaSyARK0Ku1EZDgzPV1F0JZKWmQ0jMDfBysqM",authDomain:"bitna-17ed3.firebaseapp.com",projectId:"bitna-17ed3",storageBucket:"bitna-17ed3.firebasestorage.app",messagingSenderId:"798709646035",appId:"1:798709646035:web:dd06dd5b66a339cd894a26"};
-const app=initializeApp(C),db=getFirestore(app),CO="cutting_projects",UC="cutting_users";
+const app=initializeApp(C),db=getFirestore(app),UC="cutting_users";
 
-/* 계정 불러오기 */
-window._fbGetUsers=async()=>{
+/* ── 경로 헬퍼 ──────────────────────────────────────────────────────── */
+/* 사용자별 프로젝트 컬렉션: cutting_projects_u_{username} */
+function userCol(user){return"cutting_projects_u_"+user;}
+/* 계정 문서: cutting_users/pw_{username}  (목록 노출 방지) */
+function pwDocId(user){return"pw_"+user;}
+/* Gist 문서: cutting_users/gi_{username} */
+function gistDocId(user){return"gi_"+user;}
+
+/* ── 간단 XOR 난독화 (Gist 토큰 평문 저장 방지) ─────────────────────
+   완전한 암호화는 아니지만 Firebase 콘솔에서 토큰이 직접 보이지 않게 합니다.
+   키는 프로젝트 ID + 사용자명으로 생성합니다. */
+async function _obfuscate(text, user){
+  const key = await window._sha256(C.projectId + "_" + user);
+  const enc = [];
+  for(let i=0;i<text.length;i++) enc.push(text.charCodeAt(i) ^ key.charCodeAt(i % key.length));
+  return btoa(String.fromCharCode(...enc));
+}
+async function _deobfuscate(encoded, user){
   try{
-    const s=await getDoc(doc(db,UC,"accounts"));
-    if(s.exists())return s.data().list||{};
-    const h=await window._sha256("12345");
-    const d={"12345":h};
-    await setDoc(doc(db,UC,"accounts"),{list:d});
-    return d;
-  }catch(e){console.error("fbGetUsers:",e);return{};}
+    const key = await window._sha256(C.projectId + "_" + user);
+    const raw = atob(encoded);
+    let dec = "";
+    for(let i=0;i<raw.length;i++) dec += String.fromCharCode(raw.charCodeAt(i) ^ key.charCodeAt(i % key.length));
+    return dec;
+  }catch{return "";}
+}
+
+/* ── 계정 관리 (사용자별 독립 문서) ─────────────────────────────────
+   구조: cutting_users/pw_{username} → { pwHash: "...", createdAt: "..." }
+   전체 목록 문서(accounts)를 폐기하고 개별 문서로 분리함으로써
+   한 문서 조회 시 다른 사용자 정보가 노출되지 않습니다. */
+
+/* 단일 사용자 해시 조회 */
+window._fbGetUserHash=async(uid)=>{
+  try{
+    const s=await getDoc(doc(db,UC,pwDocId(uid)));
+    if(s.exists()) return s.data().pwHash||null;
+    return null;
+  }catch(e){console.error("fbGetUserHash:",e);return null;}
 };
 
-/* 계정 저장 — 오류 상세 로깅 */
-window._fbSaveUsers=async u=>{
+/* 단일 사용자 저장/업데이트 */
+window._fbUpsertUser=async(uid,pwHash)=>{
   try{
-    await setDoc(doc(db,UC,"accounts"),{list:u});
+    await setDoc(doc(db,UC,pwDocId(uid)),{pwHash,updatedAt:new Date().toISOString()});
     return true;
-  }catch(e){
-    console.error("fbSaveUsers error:",e);
-    return false;
-  }
+  }catch(e){console.error("fbUpsertUser:",e);return false;}
 };
 
-window._fbSave=async o=>{try{const p=JSON.stringify(o),t=new Date().toISOString();await setDoc(doc(db,CO,"latest"),{payload:p,savedAt:t,savedBy:o._savedBy||""});await setDoc(doc(db,CO,"bk_"+t.replace(/[:.]/g,"-")),{payload:p,savedAt:t,savedBy:o._savedBy||""});return{ok:true,savedAt:t};}catch(e){return{ok:false,error:e.message};}};
-window._fbLoad=async()=>{try{const s=await getDoc(doc(db,CO,"latest"));if(s.exists()){const d=s.data();return{ok:true,data:JSON.parse(d.payload),savedAt:d.savedAt,savedBy:d.savedBy};}return{ok:false};}catch(e){return{ok:false,error:e.message};}};
-window._fbListBackups=async()=>{try{const q=query(collection(db,CO),orderBy("savedAt","desc"),limit(10));const s=await getDocs(q);return s.docs.filter(d=>d.id!=="latest").map(d=>({id:d.id,savedAt:d.data().savedAt,savedBy:d.data().savedBy}));}catch{return[];}};
-window._fbLoadBackup=async id=>{try{const s=await getDoc(doc(db,CO,id));if(s.exists())return{ok:true,data:JSON.parse(s.data().payload)};return{ok:false};}catch{return{ok:false};}};
+/* 단일 사용자 삭제 */
+window._fbDeleteUser=async(uid)=>{
+  try{
+    await deleteDoc(doc(db,UC,pwDocId(uid)));
+    // 연관 Gist 문서도 삭제
+    await deleteDoc(doc(db,UC,gistDocId(uid))).catch(()=>{});
+    return true;
+  }catch(e){console.error("fbDeleteUser:",e);return false;}
+};
+
+/* 하위 호환: 기존 accounts 통합 문서 → 개별 문서로 마이그레이션
+   최초 1회만 실행하고 이후에는 건너뜁니다. */
+window._fbMigrateAccounts=async()=>{
+  try{
+    const migFlagDoc=await getDoc(doc(db,UC,"_migrated_v2"));
+    if(migFlagDoc.exists()) return; // 이미 마이그레이션 완료
+    const old=await getDoc(doc(db,UC,"accounts"));
+    if(old.exists()){
+      const list=old.data().list||{};
+      for(const [uid,pwHash] of Object.entries(list)){
+        await setDoc(doc(db,UC,pwDocId(uid)),{pwHash,updatedAt:new Date().toISOString()});
+      }
+    } else {
+      // 최초 설치: 기본 계정(12345) 생성
+      const h=await window._sha256("12345");
+      await setDoc(doc(db,UC,pwDocId("12345")),{pwHash:h,updatedAt:new Date().toISOString()});
+    }
+    // 마이그레이션 완료 플래그
+    await setDoc(doc(db,UC,"_migrated_v2"),{at:new Date().toISOString()});
+  }catch(e){console.error("fbMigrateAccounts:",e);}
+};
+
+/* ── 프로젝트 저장/불러오기 (사용자별 독립 컬렉션 + 독립 문서명) ── */
+window._fbSave=async o=>{
+  try{
+    const user=o._savedBy||"_anonymous";
+    const CO=userCol(user);
+    const p=JSON.stringify(o),t=new Date().toISOString();
+    /* 최신본: "latest_{user}" — 컬렉션이 이미 사용자별이지만 문서명도 명시적으로 분리 */
+    await setDoc(doc(db,CO,"latest_"+user),{payload:p,savedAt:t,savedBy:user});
+    /* 백업본 */
+    await setDoc(doc(db,CO,"bk_"+t.replace(/[:.]/g,"-")),{payload:p,savedAt:t,savedBy:user});
+    return{ok:true,savedAt:t};
+  }catch(e){return{ok:false,error:e.message};}
+};
+window._fbLoad=async(user)=>{
+  try{
+    const CO=userCol(user||"_anonymous");
+    const uid=user||"_anonymous";
+    /* 신규 키 시도 → 구버전 "latest" 폴백 (하위 호환) */
+    let s=await getDoc(doc(db,CO,"latest_"+uid));
+    if(!s.exists()) s=await getDoc(doc(db,CO,"latest"));
+    if(s.exists()){const d=s.data();return{ok:true,data:JSON.parse(d.payload),savedAt:d.savedAt,savedBy:d.savedBy};}
+    return{ok:false};
+  }catch(e){return{ok:false,error:e.message};}
+};
+window._fbListBackups=async(user)=>{
+  try{
+    const CO=userCol(user||"_anonymous");
+    const q=query(collection(db,CO),orderBy("savedAt","desc"),limit(10));
+    const s=await getDocs(q);
+    return s.docs
+      .filter(d=>!d.id.startsWith("latest"))
+      .map(d=>({id:d.id,savedAt:d.data().savedAt,savedBy:d.data().savedBy}));
+  }catch{return[];}
+};
+window._fbLoadBackup=async(id,user)=>{
+  try{
+    const CO=userCol(user||"_anonymous");
+    const s=await getDoc(doc(db,CO,id));
+    if(s.exists())return{ok:true,data:JSON.parse(s.data().payload)};
+    return{ok:false};
+  }catch{return{ok:false};}
+};
+
+/* ── Gist 토큰 저장 (난독화 적용) ──────────────────────────────────── */
 window._fbSaveGist=async(loginUser,uid,token,gid)=>{
-  try{await setDoc(doc(db,UC,"gist_"+loginUser),{uid,token,gid});return true;}
-  catch(e){console.error("fbSaveGist:",e);return false;}
+  try{
+    const obfToken=token?await _obfuscate(token,loginUser):"";
+    await setDoc(doc(db,UC,gistDocId(loginUser)),{uid,token:obfToken,gid,updatedAt:new Date().toISOString()});
+    return true;
+  }catch(e){console.error("fbSaveGist:",e);return false;}
 };
 window._fbLoadGist=async(loginUser)=>{
-  try{const s=await getDoc(doc(db,UC,"gist_"+loginUser));if(s.exists())return s.data();return null;}
-  catch(e){return null;}
+  try{
+    const s=await getDoc(doc(db,UC,gistDocId(loginUser)));
+    if(!s.exists()) return null;
+    const d=s.data();
+    const token=d.token?await _deobfuscate(d.token,loginUser):"";
+    return{uid:d.uid,token,gid:d.gid};
+  }catch(e){return null;}
 };
-window._fbReady=true;
+
+/* ── 초기화 ─────────────────────────────────────────────────────────── */
+(async()=>{
+  await window._fbMigrateAccounts();
+  window._fbReady=true;
+})();
 </script>
 <style>
 /* === PC앱 색상 변수 === */
@@ -232,6 +369,38 @@ body{font-family:var(--font);background:var(--bg);color:var(--tx);height:100vh;o
 .mo.on{display:flex}
 .mc{background:var(--fr);border-radius:10px;border:1px solid var(--ln);box-shadow:0 8px 28px rgba(0,0,0,.14);width:90%;max-width:400px;max-height:85vh;overflow-y:auto;padding:20px;animation:mpop .2s ease}
 @keyframes mpop{from{opacity:0;transform:scale(.96)}to{opacity:1;transform:scale(1)}}
+
+/* 조각 드래그 회전버튼 글로우 */
+@keyframes rotGlow{
+  0%,100%{box-shadow:0 0 0 0 rgba(255,180,0,0);}
+  50%{box-shadow:0 0 10px 5px rgba(255,200,0,0.85),0 0 22px 10px rgba(255,180,0,0.4);}
+}
+.rot-btn{
+  position:absolute;display:none;
+  width:36px;height:36px;border-radius:50%;
+  background:rgba(25,28,40,0.94);border:2px solid #F59F00;
+  color:#FFE066;font-size:20px;line-height:1;
+  cursor:pointer;z-index:30;
+  align-items:center;justify-content:center;
+  transform:translate(-50%,-50%);
+  animation:rotGlow 1s ease-in-out infinite;
+  user-select:none;-webkit-user-select:none;
+  pointer-events:auto;
+}
+.rot-btn.on{display:flex;}
+.rot-btn:hover{background:rgba(245,159,0,0.95);color:#fff;border-color:#fff;}
+
+/* 요약 갱신 버튼 글로우 */
+#btnSumRefresh{
+  width:26px;height:26px;border-radius:50%;border:1.5px solid var(--ln);
+  background:var(--cv);color:var(--hd);cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center;
+  font-size:13px;line-height:1;transition:background .15s,border-color .15s;
+  flex-shrink:0;
+}
+#btnSumRefresh:hover{background:var(--ln);color:var(--tx);}
+
+#cv.dragging{cursor:grabbing!important;}
 .mct{font-size:14px;font-weight:700;color:var(--hd);margin-bottom:14px;display:flex;align-items:center;gap:7px}
 .mcl{margin-left:auto;background:none;border:none;font-size:18px;cursor:pointer;color:#ADB5BD;line-height:1}
 .mcl:hover{color:var(--sc)}
@@ -305,6 +474,89 @@ body{font-family:var(--font);background:var(--bg);color:var(--tx);height:100vh;o
 #MT{display:none;background:var(--fr);border-bottom:1px solid var(--ln)}
 .mt{flex:1;padding:9px;text-align:center;font-size:12px;color:#868E96;cursor:pointer;border-bottom:2px solid transparent}
 .mt.on{color:var(--ac);border-bottom-color:var(--ac)}
+
+/* 팔레트 본문 스크롤바 완전 숨김 */
+#lmPalBody::-webkit-scrollbar{display:none}
+/* 라인모드 팔레트 패널 */
+/* 4방향 스냅 레이아웃 — data-snap 속성으로 제어 */
+#lmPal[data-snap="right"] {
+  top:0;right:0;bottom:0;left:auto;width:260px;height:auto;
+  flex-direction:column;
+  border:none;
+  box-shadow:-4px 0 18px rgba(0,0,0,.55);
+}
+#lmPal[data-snap="left"] {
+  top:0;left:0;bottom:0;right:auto;width:260px;height:auto;
+  flex-direction:column;
+  border:none;
+  box-shadow:4px 0 18px rgba(0,0,0,.55);
+}
+#lmPal[data-snap="top"] {
+  top:0;left:0;right:0;bottom:auto;width:auto;height:auto;max-height:52vh;
+  flex-direction:row;
+  border:none;
+  box-shadow:0 4px 18px rgba(0,0,0,.55);
+}
+#lmPal[data-snap="bottom"] {
+  bottom:0;left:0;right:0;top:auto;width:auto;height:auto;max-height:52vh;
+  flex-direction:row;
+  border:none;
+  box-shadow:0 -4px 18px rgba(0,0,0,.55);
+}
+/* 가로 레이아웃 (상/하 스냅) 시 본문 가로 스크롤 */
+#lmPal[data-snap="top"] #lmPalBody,
+#lmPal[data-snap="bottom"] #lmPalBody {
+  display:flex;flex-direction:row;flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;
+  align-items:flex-start;gap:0;padding:0;
+}
+#lmPal[data-snap="top"] #lmPalHandle,
+#lmPal[data-snap="bottom"] #lmPalHandle {
+  flex-direction:row;height:32px;border-bottom:1px solid #1E2130;border-right:none;
+  min-width:fit-content;flex-shrink:0;
+}
+/* 섹션들 */
+.lmp-sec{padding:7px 10px 6px;border-bottom:1px solid #1A1C22}
+.lmp-sec:last-child{border-bottom:none}
+#lmPal[data-snap="top"]  .lmp-sec,
+#lmPal[data-snap="bottom"] .lmp-sec{
+  min-width:160px;max-width:200px;border-bottom:none;border-right:1px solid #1A1C22;flex-shrink:0;padding:4px 6px 4px
+}
+/* 상하 배치: 라인색상+그리드테마를 하나의 컬럼에 2행으로 묶기 */
+#lmPal[data-snap="top"]  #lmSecColorTheme,
+#lmPal[data-snap="bottom"] #lmSecColorTheme{
+  display:flex;flex-direction:column;min-width:160px;max-width:200px;border-bottom:none;border-right:1px solid #1A1C22;flex-shrink:0;padding:0;
+}
+#lmPal[data-snap="top"]  #lmSecColorTheme .lmp-sec,
+#lmPal[data-snap="bottom"] #lmSecColorTheme .lmp-sec{
+  border-right:none;min-width:unset;max-width:unset;padding:4px 6px 4px;
+}
+#lmPal[data-snap="top"]  #lmSecColorTheme .lmp-sec:first-child,
+#lmPal[data-snap="bottom"] #lmSecColorTheme .lmp-sec:first-child{
+  border-bottom:1px solid #1A1C22;
+}
+.lmp-title{font-size:10px;font-weight:700;color:#6B7280;letter-spacing:.6px;margin-bottom:4px;text-transform:uppercase}
+.lmp-sublabel{font-size:10px;color:#4B5563;margin-bottom:3px;margin-top:3px}
+.lmp-hint{font-size:10px;color:#374151;text-align:center;margin-top:2px}
+.lmp-row{display:flex;align-items:center;gap:4px}
+.lmp-slrow{display:flex;align-items:center;gap:6px;margin-bottom:4px}
+.lmp-slrow:last-child{margin-bottom:0}
+.lmp-lbl{font-size:10px;color:#9CA3AF;flex-shrink:0;white-space:nowrap}
+.lmp-val{font-size:11px;font-weight:700;width:26px;text-align:right;flex-shrink:0}
+.lmp-vcol{display:flex;flex-direction:column;align-items:center;gap:2px}
+.lmp-btn{background:#1A1D23;color:#CDD0D6;border:1px solid #252830;border-radius:3px;padding:5px 8px;cursor:pointer;font-size:12px;font-family:inherit;flex-shrink:0}
+.lmp-btn:hover{background:#252830}
+.lmp-ibtn{color:#fff;border:none;border-radius:3px;width:28px;height:24px;cursor:pointer;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.lmp-inp{background:#1A1D23;color:#CDD0D6;border:1px solid #252830;border-radius:3px;padding:5px 6px;font-size:12px;font-family:inherit;min-width:0}
+.lmp-flipbtn{flex:1;background:#1E2128;color:#ADB5BD;border:1px solid #252830;border-radius:4px;padding:9px 4px;cursor:pointer;font-size:11px;font-weight:700;font-family:'맑은 고딕',sans-serif}
+.lmp-flipbtn:hover{background:#252830}
+/* 복원 버튼 위치 — 스냅 방향에 따라 */
+#lmPalShowBtn[data-snap="right"] {right:0;top:50%;transform:translateY(-50%);left:auto;bottom:auto;writing-mode:vertical-rl}
+#lmPalShowBtn[data-snap="left"]  {left:0;top:50%;transform:translateY(-50%);right:auto;bottom:auto;writing-mode:vertical-rl;border-radius:0 6px 6px 0}
+#lmPalShowBtn[data-snap="top"]   {top:0;left:50%;transform:translateX(-50%);right:auto;bottom:auto;writing-mode:horizontal-tb;border-radius:0 0 6px 6px}
+#lmPalShowBtn[data-snap="bottom"]{bottom:0;left:50%;transform:translateX(-50%);right:auto;top:auto;writing-mode:horizontal-tb;border-radius:6px 6px 0 0}
+/* 스냅 가이드 오버레이 */
+.lm-snap-guide{position:fixed;z-index:9999;pointer-events:none;opacity:0;transition:opacity .15s;background:rgba(96,165,250,.18);border:2px solid #60A5FA}
+.lm-snap-guide.on{opacity:1}
 </style>
 </head>
 <body>
@@ -430,8 +682,41 @@ body{font-family:var(--font);background:var(--bg);color:var(--tx);height:100vh;o
     <button class="zvbtn" onclick="zoom(0.8)" title="축소">−</button>
     <button class="zvbtn" onclick="resetZoom()" title="리셋">⟳</button>
   </div>
-  <div id="CW"><canvas id="cv"></canvas></div>
-  <div id="IB"></div>
+  <div id="CW" style="position:relative"><canvas id="cv"></canvas>
+    <!-- 조각별 회전버튼 오버레이 -->
+    <button id="cvRotBtn" class="rot-btn" onclick="_cvRotateFreePiece()" title="조각 회전 (90°)">↻</button>
+
+    <!-- 미리보기 좌측하단 Undo/Redo 버튼 -->
+    <div id="cvUndoRedo" style="position:absolute;bottom:10px;left:10px;display:flex;gap:5px;z-index:10">
+      <button id="cvBtnUndo" onclick="doUndo()" title="Undo (Ctrl+Z)"
+        style="height:28px;padding:0 9px;font-size:11px;font-weight:700;border:1px solid var(--ln);border-radius:5px;background:var(--fr);color:var(--tx);cursor:pointer;font-family:var(--font);display:flex;align-items:center;gap:3px;box-shadow:0 1px 4px rgba(0,0,0,.12);opacity:0.38" disabled>
+        <svg width="12" height="12" viewBox="0 0 13 13"><path d="M2.5 4.5 Q6.5 1 10.5 4.5 Q13 7 10 10" stroke="currentColor" stroke-width="1.7" fill="none" stroke-linecap="round"/><polygon points="2.5,1.5 2.5,7 7,4.5" fill="currentColor"/></svg>Undo
+      </button>
+      <button id="cvBtnRedo" onclick="doRedo()" title="Redo (Ctrl+Y)"
+        style="height:28px;padding:0 9px;font-size:11px;font-weight:700;border:1px solid var(--ln);border-radius:5px;background:var(--fr);color:var(--tx);cursor:pointer;font-family:var(--font);display:flex;align-items:center;gap:3px;box-shadow:0 1px 4px rgba(0,0,0,.12);opacity:0.38" disabled>
+        <svg width="12" height="12" viewBox="0 0 13 13"><path d="M10.5 4.5 Q6.5 1 2.5 4.5 Q0 7 3 10" stroke="currentColor" stroke-width="1.7" fill="none" stroke-linecap="round"/><polygon points="10.5,1.5 10.5,7 6,4.5" fill="currentColor"/></svg>Redo
+      </button>
+    </div>
+  </div>
+  <div id="IB">
+    <div class="ibox" style="gap:4px;padding:0 8px;flex-shrink:0;border-right:1px solid var(--ln)">
+      <button id="btnUndo" onclick="doUndo()" title="Undo (Ctrl+Z)"
+        style="height:24px;padding:0 7px;font-size:11px;font-weight:700;border:1px solid var(--ln);border-radius:4px;background:var(--cv);color:var(--tx);cursor:pointer;font-family:var(--font);display:flex;align-items:center;gap:2px;opacity:0.38" disabled>
+        <svg width="12" height="12" viewBox="0 0 13 13"><path d="M2.5 4.5 Q6.5 1 10.5 4.5 Q13 7 10 10" stroke="currentColor" stroke-width="1.7" fill="none" stroke-linecap="round"/><polygon points="2.5,1.5 2.5,7 7,4.5" fill="currentColor"/></svg>Undo
+      </button>
+      <button id="btnRedo" onclick="doRedo()" title="Redo (Ctrl+Y)"
+        style="height:24px;padding:0 7px;font-size:11px;font-weight:700;border:1px solid var(--ln);border-radius:4px;background:var(--cv);color:var(--tx);cursor:pointer;font-family:var(--font);display:flex;align-items:center;gap:2px;opacity:0.38" disabled>
+        <svg width="12" height="12" viewBox="0 0 13 13"><path d="M10.5 4.5 Q6.5 1 2.5 4.5 Q0 7 3 10" stroke="currentColor" stroke-width="1.7" fill="none" stroke-linecap="round"/><polygon points="10.5,1.5 10.5,7 6,4.5" fill="currentColor"/></svg>Redo
+      </button>
+    </div>
+    <!-- 요약정보 버튼 — IB 정보바 우측 끝 -->
+    <button id="btnSumOpen" onclick="openSumPopup(curFilm)"
+      style="margin-left:auto;margin-right:8px;height:24px;padding:0 10px;font-size:11px;font-weight:700;
+             border:1px solid var(--ln);border-radius:4px;background:var(--cv);color:var(--tx);
+             cursor:pointer;display:flex;align-items:center;gap:4px;white-space:nowrap;flex-shrink:0;">
+      📋 요약정보
+    </button>
+  </div>
 </div>
 
 </div><!-- /ML -->
@@ -547,159 +832,284 @@ body{font-family:var(--font);background:var(--bg);color:var(--tx);height:100vh;o
     </div>
     <button class="zvbtn" onclick="fzoom(1.2)">+</button>
     <button class="zvbtn" onclick="fzoom(0.8)">−</button>
-    <button class="zvbtn" onclick="fresetZoom()">⟳</button>
+    <button class="zvbtn" onclick="fresetZoom()" title="리셋">⟳</button>
+    <div style="display:flex;border:1px solid var(--ln);border-radius:5px;overflow:hidden;flex-shrink:0;height:27px;margin-left:2px">
+      <button id="fBtnUndo" onclick="doUndo()" title="Undo (Ctrl+Z)"
+        style="padding:0 8px;font-size:11px;font-weight:700;border:none;background:var(--cv);color:var(--tx);cursor:pointer;font-family:var(--font);display:flex;align-items:center;gap:2px;opacity:0.38" disabled>
+        <svg width="11" height="11" viewBox="0 0 13 13"><path d="M2.5 4.5 Q6.5 1 10.5 4.5 Q13 7 10 10" stroke="currentColor" stroke-width="1.7" fill="none" stroke-linecap="round"/><polygon points="2.5,1.5 2.5,7 7,4.5" fill="currentColor"/></svg>Undo
+      </button>
+      <div style="width:1px;background:var(--ln)"></div>
+      <button id="fBtnRedo" onclick="doRedo()" title="Redo (Ctrl+Y)"
+        style="padding:0 8px;font-size:11px;font-weight:700;border:none;background:var(--cv);color:var(--tx);cursor:pointer;font-family:var(--font);display:flex;align-items:center;gap:2px;opacity:0.38" disabled>
+        <svg width="11" height="11" viewBox="0 0 13 13"><path d="M10.5 4.5 Q6.5 1 2.5 4.5 Q0 7 3 10" stroke="currentColor" stroke-width="1.7" fill="none" stroke-linecap="round"/><polygon points="10.5,1.5 10.5,7 6,4.5" fill="currentColor"/></svg>Redo
+      </button>
+      <div style="width:1px;background:var(--ln)"></div>
+      <button onclick="fresetZoom()" title="화면 리셋 (초기 크기/위치)"
+        style="padding:0 8px;font-size:11px;font-weight:700;border:none;background:var(--cv);color:var(--tx);cursor:pointer;font-family:var(--font);display:flex;align-items:center;gap:2px">
+        <svg width="11" height="11" viewBox="0 0 13 13"><path d="M2 6.5 A4.5 4.5 0 1 1 6.5 11" stroke="currentColor" stroke-width="1.7" fill="none" stroke-linecap="round"/><polygon points="2,3.5 2,9 6,6.5" fill="currentColor"/></svg>리셋
+      </button>
+    </div>
     <button id="lineModeBtn" onclick="openLineMode()" title="라인모드 (프로젝터용)" style="font-size:11px;width:auto;padding:0 10px;background:#0B7285;color:#fff;border:1px solid #0B7285;border-radius:5px;height:27px;cursor:pointer;font-weight:700;flex-shrink:0">☰ Line Mode</button>
     <button class="abtn sec" style="flex:0;padding:4px 11px;font-size:11px;margin-left:4px;white-space:nowrap;line-height:1.4;display:flex;align-items:center;gap:3px" onclick="cmo('fullMo')">✕ 닫기</button>
   </div>
-  <canvas id="fullCv"></canvas>
-</div></div>
+  <div style="position:relative;flex:1;overflow:hidden">
+  <canvas id="fullCv" style="display:block;width:100%;height:100%"></canvas>
+  <!-- 조각별 회전버튼 오버레이 (Full창) -->
+  <button id="fRotBtn" class="rot-btn" onclick="_fRotateFreePiece()" title="조각 회전 (90°)">↻</button>
 
-<!-- Line Mode 모달 (Python 원본 open_line_mode() 동일) -->
-<div id="lineMo" style="display:none;position:fixed;inset:0;z-index:1200;background:#000;flex-direction:column">
-  <!-- 라인모드 캔버스 -->
-  <canvas id="lmCv" style="flex:1;display:block;width:100%;cursor:crosshair;background:#000"></canvas>
-  <!-- 상태 라벨 (좌하단) -->
-  <div id="lmFocusLbl" style="position:absolute;left:12px;bottom:10px;font-size:11px;font-weight:700;color:#74C0FC;font-family:'맑은 고딕',sans-serif;pointer-events:none">전체보기  |  ▶ 로 이동</div>
-  <!-- 제어판 토글 버튼 (우상단) -->
-  <button id="lmCtrlBtn" onclick="lmToggleCtrl()" style="position:absolute;right:10px;top:10px;background:#1A1D23;color:#ADB5BD;border:none;border-radius:5px;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;font-family:'맑은 고딕',sans-serif">☰ 제어판</button>
-  <!-- 제어판 패널 (드래그 이동 가능) -->
-  <div id="lmCtrl" style="position:absolute;right:10px;top:40px;width:268px;background:#16181E;border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,.6);z-index:10;overflow:hidden;cursor:default">
-    <!-- 드래그 핸들 -->
-    <div id="lmCtrlHandle" style="height:28px;background:#1E2128;border-bottom:1px solid #2A2D36;display:flex;align-items:center;padding:0 8px;cursor:grab;user-select:none;gap:6px">
-      <span style="font-size:9px;color:#6B7280;letter-spacing:1px;flex:1">⠿ 제어판 (드래그로 이동)</span>
-      <button onclick="lmToggleLayout(event)" id="lmLayoutBtn" title="가로/세로 전환" style="background:#252830;color:#ADB5BD;border:1px solid #2A2D36;border-radius:3px;padding:1px 7px;font-size:9px;cursor:pointer;font-family:inherit;flex-shrink:0;pointer-events:all">⇆ 가로</button>
-    </div>
-    <div id="lmCtrlBody">
-    <!-- 섹션1: 라인 색상 -->
-    <div style="padding:8px 10px 0">
-      <div style="font-size:9px;font-weight:700;color:#6B7280;margin-bottom:3px">● 라인 색상</div>
-      <div id="lmLineSwatches" style="background:#1E2128;border:1px solid #2A2D36;border-radius:5px;padding:6px 8px;display:flex;gap:4px;flex-wrap:wrap"></div>
-    </div>
-    <!-- 섹션2: 그리드 색상 -->
-    <div style="padding:8px 10px 0">
-      <div style="font-size:9px;font-weight:700;color:#6B7280;margin-bottom:3px">▦ 그리드 색상</div>
-      <div id="lmGridSwatches" style="background:#1E2128;border:1px solid #2A2D36;border-radius:5px;padding:6px 8px;display:flex;gap:3px;flex-wrap:wrap"></div>
-    </div>
-    <!-- 섹션3: X 오프셋 -->
-    <div style="padding:8px 10px 0">
-      <div style="font-size:9px;font-weight:700;color:#6B7280;margin-bottom:3px">↔ X 오프셋</div>
-      <div style="background:#1E2128;border:1px solid #2A2D36;border-radius:5px;padding:6px 8px;display:flex;align-items:center;gap:8px">
-        <span style="font-size:10px;color:#6B7280">오프셋</span>
-        <button onclick="lmOxStep(-100)" style="background:#252830;color:#CDD0D6;border:1px solid #2A2D36;border-radius:3px;padding:2px 7px;cursor:pointer;font-size:12px">◀</button>
-        <input id="lmOxInp" type="number" value="0" style="width:60px;background:#252830;color:#CDD0D6;border:1px solid #2A2D36;border-radius:3px;padding:2px 5px;font-size:11px;text-align:center" oninput="lmDraw()">
-        <button onclick="lmOxStep(+100)" style="background:#252830;color:#CDD0D6;border:1px solid #2A2D36;border-radius:3px;padding:2px 7px;cursor:pointer;font-size:12px">▶</button>
-        <span style="font-size:10px;color:#6B7280">px</span>
-      </div>
-    </div>
-    <!-- 섹션4: 뷰 컨트롤 -->
-    <div style="padding:8px 10px 0">
-      <div style="font-size:9px;font-weight:700;color:#6B7280;margin-bottom:3px">⊞ 뷰 컨트롤</div>
-      <div style="background:#1E2128;border:1px solid #2A2D36;border-radius:5px;padding:6px 8px">
-        <div style="display:flex;gap:6px;align-items:flex-end">
-          <div style="display:flex;flex-direction:column;align-items:center;gap:2px">
-            <span style="font-size:9px;color:#6B7280">줌</span>
-            <div style="display:flex;gap:2px">
-              <button onclick="lmZoom(1.2)" style="background:#1D4ED8;color:#fff;border:none;border-radius:3px;width:26px;padding:4px 0;cursor:pointer;font-size:13px;font-weight:700">＋</button>
-              <button onclick="lmZoom(0.833)" style="background:#1D4ED8;color:#fff;border:none;border-radius:3px;width:26px;padding:4px 0;cursor:pointer;font-size:13px;font-weight:700">－</button>
-            </div>
-          </div>
-          <div style="display:flex;flex-direction:column;align-items:center;gap:2px">
-            <span style="font-size:9px;color:#6B7280">조각</span>
-            <div style="display:flex;gap:2px">
-              <button onclick="lmNav(-1)" style="background:#4338CA;color:#fff;border:none;border-radius:3px;width:26px;padding:4px 0;cursor:pointer;font-size:13px;font-weight:700">◀</button>
-              <button onclick="lmNav(+1)" style="background:#4338CA;color:#fff;border:none;border-radius:3px;width:26px;padding:4px 0;cursor:pointer;font-size:13px;font-weight:700">▶</button>
-            </div>
-          </div>
-          <div style="display:flex;flex-direction:column;align-items:center;gap:2px">
-            <span style="font-size:9px;color:#6B7280">리셋</span>
-            <button onclick="lmReset()" style="background:#065F46;color:#fff;border:none;border-radius:3px;width:26px;padding:4px 0;cursor:pointer;font-size:14px;font-weight:700">⟳</button>
-          </div>
-        </div>
-        <div style="font-size:9px;color:#6B7280;margin-top:5px">🖱 마우스휠로도 확대 / 축소 가능</div>
-      </div>
-    </div>
-    <!-- 섹션5: 색회전 -->
-    <div style="padding:8px 10px 0">
-      <div style="font-size:9px;font-weight:700;color:#6B7280;margin-bottom:3px">🎨 색회전</div>
-      <div style="background:#1E2128;border:1px solid #2A2D36;border-radius:5px;overflow:hidden">
-        <button id="lmCrBtn" onclick="lmToggleCr()" style="width:100%;background:#1E2128;color:#6B7280;border:none;padding:7px;cursor:pointer;font-size:11px;font-weight:700;font-family:'맑은 고딕',sans-serif;border:1px solid #2A2D36">○ 색회전  OFF</button>
-        <div style="font-size:9px;color:#6B7280;padding:0 8px 6px;text-align:center">조각마다 다른 색으로 구분 표시</div>
-      </div>
-    </div>
-    <!-- 섹션6: 조각 라인 굵기 -->
-    <div style="padding:8px 10px 0">
-      <div style="font-size:9px;font-weight:700;color:#6B7280;margin-bottom:3px">━ 조각 라인 굵기</div>
-      <div style="background:#1E2128;border:1px solid #2A2D36;border-radius:5px;padding:8px">
-        <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
-          <span style="font-size:9px;color:#ADB5BD;width:56px;flex-shrink:0">조각라인</span>
-          <input id="lmPartLW" type="range" min="1" max="12" step="0.5" value="2"
-            style="flex:1;accent-color:#34D399;cursor:pointer"
-            oninput="document.getElementById('lmPartLWVal').textContent=this.value;lmDraw()"
-            onmousedown="this.dataset.focused='1'" onblur="this.dataset.focused='0'">
-          <span id="lmPartLWVal" style="font-size:10px;color:#34D399;width:26px;text-align:right;font-weight:700">2</span>
-        </div>
-        <div style="display:flex;align-items:center;gap:6px;">
-          <span style="font-size:9px;color:#ADB5BD;width:56px;flex-shrink:0">그리드</span>
-          <input id="lmGridLW" type="range" min="0.5" max="4" step="0.5" value="1"
-            style="flex:1;accent-color:#9CA3AF;cursor:pointer"
-            oninput="document.getElementById('lmGridLWVal').textContent=this.value;lmDraw()"
-            onmousedown="this.dataset.focused='1'" onblur="this.dataset.focused='0'">
-          <span id="lmGridLWVal" style="font-size:10px;color:#9CA3AF;width:26px;text-align:right;font-weight:700">1</span>
-        </div>
-      </div>
-    </div>
-    <!-- 섹션6b: 원자재 라인 굵기 -->
-    <div style="padding:8px 10px 0">
-      <div style="font-size:9px;font-weight:700;color:#6B7280;margin-bottom:3px">━ 원자재 라인 굵기</div>
-      <div style="background:#1E2128;border:1px solid #2A2D36;border-radius:5px;padding:8px">
-        <div style="display:flex;align-items:center;gap:6px;">
-          <span style="font-size:9px;color:#ADB5BD;width:56px;flex-shrink:0">원자재</span>
-          <input id="lmPanelLW" type="range" min="1" max="12" step="0.5" value="3"
-            style="flex:1;accent-color:#60A5FA;cursor:pointer"
-            oninput="document.getElementById('lmPanelLWVal').textContent=this.value;lmDraw()"
-            onmousedown="this.dataset.focused='1'" onblur="this.dataset.focused='0'">
-          <span id="lmPanelLWVal" style="font-size:10px;color:#60A5FA;width:26px;text-align:right;font-weight:700">3</span>
-        </div>
-      </div>
-    </div>
-    <!-- 섹션6c: 텍스트 크기 -->
-    <div style="padding:8px 10px 0">
-      <div style="font-size:9px;font-weight:700;color:#6B7280;margin-bottom:3px">✎ 텍스트 크기</div>
-      <div style="background:#1E2128;border:1px solid #2A2D36;border-radius:5px;padding:8px">
-        <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
-          <span style="font-size:9px;color:#ADB5BD;width:56px;flex-shrink:0">조각이름</span>
-          <input id="lmNameFS" type="range" min="6" max="32" step="1" value="14"
-            style="flex:1;accent-color:#FBBF24;cursor:pointer"
-            oninput="document.getElementById('lmNameFSVal').textContent=this.value;lmDraw()"
-            onmousedown="this.dataset.focused='1'" onblur="this.dataset.focused='0'">
-          <span id="lmNameFSVal" style="font-size:10px;color:#FBBF24;width:26px;text-align:right;font-weight:700">14</span>
-        </div>
-        <div style="display:flex;align-items:center;gap:6px;">
-          <span style="font-size:9px;color:#ADB5BD;width:56px;flex-shrink:0">치수숫자</span>
-          <input id="lmDimFS" type="range" min="5" max="24" step="1" value="11"
-            style="flex:1;accent-color:#F87171;cursor:pointer"
-            oninput="document.getElementById('lmDimFSVal').textContent=this.value;lmDraw()"
-            onmousedown="this.dataset.focused='1'" onblur="this.dataset.focused='0'">
-          <span id="lmDimFSVal" style="font-size:10px;color:#F87171;width:26px;text-align:right;font-weight:700">11</span>
-        </div>
-      </div>
-    </div>
-    <!-- 섹션7: 회전/반전 -->
-    <div class="lm-sec" style="padding:8px 10px 0">
-      <div style="font-size:9px;font-weight:700;color:#6B7280;margin-bottom:3px">↺ 회전 / 반전</div>
-      <div style="background:#1E2128;border:1px solid #2A2D36;border-radius:5px;padding:6px 8px;display:flex;gap:4px">
-        <button id="lmBtnTurn"  onclick="lmDoTurn()"    style="flex:1;background:#252830;color:#ADB5BD;border:1px solid #2A2D36;border-radius:4px;padding:5px 4px;cursor:pointer;font-size:10px;font-weight:700;font-family:'맑은 고딕',sans-serif">Turn</button>
-        <button id="lmBtnFlipX" onclick="lmDoFlip('x')" style="flex:1;background:#252830;color:#ADB5BD;border:1px solid #2A2D36;border-radius:4px;padding:5px 4px;cursor:pointer;font-size:10px;font-weight:700;font-family:'맑은 고딕',sans-serif">⇔X</button>
-        <button id="lmBtnFlipY" onclick="lmDoFlip('y')" style="flex:1;background:#252830;color:#ADB5BD;border:1px solid #2A2D36;border-radius:4px;padding:5px 4px;cursor:pointer;font-size:10px;font-weight:700;font-family:'맑은 고딕',sans-serif">⇕Y</button>
-      </div>
-    </div>
-    </div><!-- /lmCtrlBody -->
-    <!-- 하단 버튼 -->
-    <div style="padding:10px">
-      <button onclick="lmToggleCtrl()" style="width:100%;background:#1E2128;color:#6B7280;border:1px solid #2A2D36;border-radius:5px;padding:7px;cursor:pointer;font-size:11px;font-family:'맑은 고딕',sans-serif;margin-bottom:4px">▼  최소화</button>
-      <button onclick="closeLineMode()" style="width:100%;background:#7F1D1D;color:#FCA5A5;border:none;border-radius:5px;padding:8px;cursor:pointer;font-size:11px;font-weight:700;font-family:'맑은 고딕',sans-serif">✕  라인모드 종료</button>
+  <!-- Full창 우측하단 요약정보 버튼 -->
+  <button onclick="openSumPopup(fF)" title="요약정보"
+    style="position:absolute;bottom:10px;right:10px;z-index:10;
+           height:30px;padding:0 13px;font-size:12px;font-weight:700;
+           border:1px solid rgba(255,255,255,0.18);border-radius:5px;
+           background:rgba(30,33,48,0.88);color:#CDD0D6;
+           cursor:pointer;display:flex;align-items:center;gap:5px;
+           box-shadow:0 1px 6px rgba(0,0,0,.35);white-space:nowrap;">
+    📋 요약정보
+  </button>
+
+  </div></div>
+
+<!-- Line Mode 모달 -->
+<div id="lineMo" style="display:none;position:fixed;inset:0;z-index:1200;background:#000">
+  <!-- 캔버스 — 패널 위치에 따라 margin으로 공간 확보 -->
+  <canvas id="lmCv" style="position:absolute;inset:0;width:100%;height:100%;cursor:crosshair;background:#000;display:block"></canvas>
+
+
+  <!-- beam projector 로고 힌트 -->
+  <div id="lmBeamLogo" style="position:absolute;top:10px;left:12px;display:flex;align-items:center;gap:7px;pointer-events:none;z-index:25;opacity:0.72">
+    <!-- 프로젝터 아이콘 SVG -->
+    <svg width="38" height="22" viewBox="0 0 38 22" xmlns="http://www.w3.org/2000/svg">
+      <!-- 본체 -->
+      <rect x="1" y="5" width="22" height="13" rx="3" fill="#1E3A5F" stroke="#3B82F6" stroke-width="1.2"/>
+      <!-- 렌즈 원 -->
+      <circle cx="19" cy="11.5" r="4.5" fill="#0F172A" stroke="#60A5FA" stroke-width="1.2"/>
+      <circle cx="19" cy="11.5" r="2.2" fill="#1D4ED8" opacity="0.9"/>
+      <circle cx="19" cy="11.5" r="0.9" fill="#93C5FD"/>
+      <!-- 상단 버튼 돌기 -->
+      <rect x="7" y="3.2" width="6" height="2" rx="1" fill="#2563EB" opacity="0.8"/>
+      <!-- 빔 광선 (3줄 부채꼴) -->
+      <line x1="23.5" y1="9"    x2="37" y2="3"   stroke="#60A5FA" stroke-width="1" stroke-linecap="round" opacity="0.7"/>
+      <line x1="23.5" y1="11.5" x2="37" y2="11.5" stroke="#93C5FD" stroke-width="1.3" stroke-linecap="round" opacity="0.85"/>
+      <line x1="23.5" y1="14"   x2="37" y2="20"  stroke="#60A5FA" stroke-width="1" stroke-linecap="round" opacity="0.7"/>
+      <!-- 받침대 -->
+      <rect x="8" y="18" width="8" height="2.5" rx="1" fill="#1E3A5F" stroke="#3B82F6" stroke-width="0.8"/>
+    </svg>
+    <!-- 텍스트 -->
+    <div style="display:flex;flex-direction:column;line-height:1.15">
+      <span style="font-size:11px;font-weight:800;color:#93C5FD;letter-spacing:1.5px;font-family:'Segoe UI',sans-serif;text-transform:uppercase">beam</span>
+      <span style="font-size:9px;font-weight:600;color:#3B82F6;letter-spacing:2.5px;font-family:'Segoe UI',sans-serif;text-transform:uppercase">projector</span>
     </div>
   </div>
+
+  <!-- ══ 팔레트 패널 ══
+       data-snap: right|left|top|bottom  — 현재 붙은 방향
+       기본: right (우측) -->
+  <div id="lmPal" data-snap="right"
+    style="position:absolute;top:0;right:0;bottom:0;width:260px;
+           background:#12141A;border-left:1px solid #1E2130;
+           display:flex;flex-direction:column;overflow:hidden;
+           box-shadow:-4px 0 18px rgba(0,0,0,.55);z-index:20;transition:none">
+
+    <!-- 헤더 (드래그 핸들 + Undo/Redo + 종료) -->
+    <div id="lmPalHandle" style="height:38px;background:#0A0C10;border-bottom:1px solid #1E2130;
+         display:flex;align-items:center;padding:0 6px;gap:4px;flex-shrink:0;cursor:grab;user-select:none">
+      <!-- 4방향 십자 이동 아이콘 (디테일) -->
+      <span style="display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:grab;opacity:0.75" title="드래그하여 팔레트 이동">
+        <svg width="30" height="30" viewBox="0 0 30 30" xmlns="http://www.w3.org/2000/svg">
+          <!-- 상 화살표 -->
+          <polygon points="15,2 18.5,8 11.5,8" fill="#8B929A"/>
+          <rect x="13.3" y="7.5" width="3.4" height="5.5" rx="0.8" fill="#8B929A"/>
+          <!-- 하 화살표 -->
+          <polygon points="15,28 18.5,22 11.5,22" fill="#8B929A"/>
+          <rect x="13.3" y="17" width="3.4" height="5.5" rx="0.8" fill="#8B929A"/>
+          <!-- 좌 화살표 -->
+          <polygon points="2,15 8,11.5 8,18.5" fill="#8B929A"/>
+          <rect x="7.5" y="13.3" width="5.5" height="3.4" rx="0.8" fill="#8B929A"/>
+          <!-- 우 화살표 -->
+          <polygon points="28,15 22,11.5 22,18.5" fill="#8B929A"/>
+          <rect x="17" y="13.3" width="5.5" height="3.4" rx="0.8" fill="#8B929A"/>
+          <!-- 중심 마름모 -->
+          <rect x="12.5" y="12.5" width="5" height="5" rx="1" fill="#B0B8C4" transform="rotate(45 15 15)"/>
+        </svg>
+      </span>
+      <!-- Undo / Redo -->
+      <button id="lmBtnUndo" onclick="doUndo()" title="Undo (Ctrl+Z)"
+        style="background:#1A1D24;color:#9CA3AF;border:1px solid #2A2D36;border-radius:3px;
+               padding:3px 7px;font-size:10px;font-weight:700;cursor:pointer;font-family:inherit;
+               display:flex;align-items:center;gap:2px;flex-shrink:0;opacity:0.38" disabled>
+        <svg width="10" height="10" viewBox="0 0 13 13"><path d="M2.5 4.5 Q6.5 1 10.5 4.5 Q13 7 10 10" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round"/><polygon points="2.5,1.5 2.5,7 7,4.5" fill="currentColor"/></svg>Undo
+      </button>
+      <button id="lmBtnRedo" onclick="doRedo()" title="Redo (Ctrl+Y)"
+        style="background:#1A1D24;color:#9CA3AF;border:1px solid #2A2D36;border-radius:3px;
+               padding:3px 7px;font-size:10px;font-weight:700;cursor:pointer;font-family:inherit;
+               display:flex;align-items:center;gap:2px;flex-shrink:0;opacity:0.38" disabled>
+        <svg width="10" height="10" viewBox="0 0 13 13"><path d="M10.5 4.5 Q6.5 1 2.5 4.5 Q0 7 3 10" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round"/><polygon points="10.5,1.5 10.5,7 6,4.5" fill="currentColor"/></svg>Redo
+      </button>
+      <button onclick="closeLineMode()"
+        style="background:#7F1D1D;color:#FCA5A5;border:none;border-radius:3px;
+               padding:5px 12px;font-size:12px;font-weight:700;cursor:pointer;font-family:'맑은 고딕',sans-serif;flex-shrink:0;margin-left:auto">닫기 ✕</button>
+    </div>
+
+    <!-- 패널 본문 -->
+    <div id="lmPalBody" style="flex:1;overflow-y:auto;overflow-x:hidden;scrollbar-width:none;-ms-overflow-style:none">
+
+      <!-- ▌뷰 컨트롤 -->
+      <div class="lmp-sec">
+        <div class="lmp-title">⊞ 뷰 컨트롤</div>
+        <!-- 방향 이동 버튼 (가로 1줄) -->
+        <div style="display:flex;gap:8px;justify-content:center;margin-bottom:8px">
+          <button onclick="lmOxStep(-100)" class="lmp-ibtn" style="background:#374151;font-size:14px;width:36px;height:28px" title="왼쪽 이동">◀</button>
+          <button onclick="lmOyStep(-80)"  class="lmp-ibtn" style="background:#374151;font-size:14px;width:36px;height:28px" title="위로 이동">▲</button>
+          <button onclick="lmOyStep(+80)"  class="lmp-ibtn" style="background:#374151;font-size:14px;width:36px;height:28px" title="아래로 이동">▼</button>
+          <button onclick="lmOxStep(+100)" class="lmp-ibtn" style="background:#374151;font-size:14px;width:36px;height:28px" title="오른쪽 이동">▶</button>
+        </div>
+        <!-- 줌 + 리턴 -->
+        <div style="display:flex;gap:8px;justify-content:center">
+          <button onclick="lmZoom(1.2)"   class="lmp-ibtn" style="background:#1D4ED8;width:54px;height:28px;font-size:12px" title="확대">＋ 확대</button>
+          <button onclick="lmZoom(0.833)" class="lmp-ibtn" style="background:#1D4ED8;width:54px;height:28px;font-size:12px" title="축소">－ 축소</button>
+          <button onclick="lmReset()"     class="lmp-ibtn" style="background:#065F46;width:36px;height:28px;font-size:14px" title="리셋 (초기 크기/위치)">⟳</button>
+        </div>
+        <div class="lmp-hint">🖱 마우스휠 = 확대/축소</div>
+      </div>
+
+      <!-- ▌라인 색상 + 그리드 테마 (상하배치 시 2행 묶음) -->
+      <div id="lmSecColorTheme">
+      <!-- ▌라인 색상 -->
+      <div class="lmp-sec">
+        <div class="lmp-title">● 라인 색상</div>
+        <div id="lmLineSwatches" style="display:flex;gap:3px;flex-wrap:nowrap;align-items:center;overflow:hidden"></div>
+      </div>
+
+      <!-- ▌그리드 테마 -->
+      <div class="lmp-sec">
+        <div class="lmp-title">▦ 그리드 테마</div>
+        <div id="lmGridSwatches" style="display:flex;gap:3px;flex-wrap:nowrap;align-items:center;overflow:hidden"></div>
+      </div>
+      </div><!-- /lmSecColorTheme -->
+
+      <!-- ▌색회전 -->
+      <div class="lmp-sec">
+        <div class="lmp-title">🎨 색회전</div>
+        <button id="lmCrBtn" onclick="lmToggleCr()"
+          style="width:100%;background:#1A1D23;color:#6B7280;border:1px solid #252830;border-radius:4px;
+                 padding:8px;cursor:pointer;font-size:11px;font-weight:700;font-family:'맑은 고딕',sans-serif">○ 색회전  OFF</button>
+        <div class="lmp-hint">조각마다 다른 색으로 구분</div>
+      </div>
+
+      <!-- ▌그리드 간격 -->
+      <div class="lmp-sec">
+        <div class="lmp-row" style="justify-content:space-between;margin-bottom:4px">
+          <div class="lmp-title" style="margin-bottom:0">▦그리드간격</div>
+          <button onclick="lmAutoSaveGridDims()" title="그리드 간격 저장"
+            style="background:#065F46;color:#6EE7B7;border:none;border-radius:3px;padding:3px 7px;cursor:pointer;font-size:10px;font-weight:700;font-family:'맑은 고딕',sans-serif;flex-shrink:0">💾 저장</button>
+          <select id="lmGridUnit" style="background:#1A1D23;color:#CDD0D6;border:1px solid #252830;border-radius:3px;padding:3px 5px;font-size:11px;font-family:'맑은 고딕',sans-serif;cursor:pointer" onchange="lmDraw();lmUpdateEdgeUnitLabels()">
+            <option value="mm">mm</option>
+            <option value="cm">cm</option>
+            <option value="m">m</option>
+            <option value="2.54cm">in→2.54cm</option>
+          </select>
+        </div>
+        <div class="lmp-sublabel">| 가로 (수직선) &nbsp;<span id="lmGridXUnit" style="color:#60A5FA">(mm)</span><span style="color:#9CA3AF;margin-left:3px">X</span></div>
+        <div class="lmp-row">
+          <input id="lmGridStepX500" type="number" value="" min="0" step="any" placeholder="입력" class="lmp-inp" style="flex:1" oninput="lmDraw()">
+        </div>
+        <div class="lmp-sublabel" style="margin-top:4px">— 세로 (수평선) &nbsp;<span id="lmGridYUnit" style="color:#60A5FA">(mm)</span><span style="color:#9CA3AF;margin-left:3px">Y</span></div>
+        <div class="lmp-row">
+          <input id="lmGridStepY500" type="number" value="" min="0" step="any" placeholder="입력" class="lmp-inp" style="flex:1" oninput="lmDraw()">
+        </div>
+      </div>
+
+      <!-- ▌폭 강조선 -->
+      <div class="lmp-sec">
+        <div class="lmp-title">📐 폭 강조선</div>
+
+        <!-- 가로(수직선) -->
+        <div class="lmp-sublabel" style="margin-bottom:3px">| 가로 (수직선) &nbsp;<span id="lmEdgeXUnit" style="color:#60A5FA">(mm)</span></div>
+        <div class="lmp-row" style="gap:4px;margin-bottom:2px">
+          <input id="lmEdgeXInp" type="text" placeholder="예) 10,500,1200" class="lmp-inp"
+            style="flex:1;min-width:0"
+            onkeydown="if(event.key==='Enter'){lmEdgeApply();}"
+            onblur="lmEdgeApply()">
+          <label style="display:flex;align-items:center;gap:2px;cursor:pointer;flex-shrink:0;font-size:10px;color:#9CA3AF;white-space:nowrap">
+            <input type="checkbox" id="lmEdgeXRepeat" style="accent-color:#60A5FA;width:13px;height:13px;cursor:pointer" onchange="lmEdgeApply()">반복
+          </label>
+          <button onclick="lmEdgeApply()" style="background:#1D4ED8;color:#fff;border:none;border-radius:3px;padding:4px 7px;cursor:pointer;font-size:10px;font-weight:700;font-family:'맑은 고딕',sans-serif;flex-shrink:0">확인</button>
+        </div>
+
+        <!-- 세로(수평선) -->
+        <div class="lmp-sublabel" style="margin-bottom:3px;margin-top:5px">— 세로 (수평선) &nbsp;<span id="lmEdgeYUnit" style="color:#60A5FA">(mm)</span></div>
+        <div class="lmp-row" style="gap:4px;margin-bottom:3px">
+          <input id="lmEdgeYInp" type="text" placeholder="예) 10,500,1200" class="lmp-inp"
+            style="flex:1;min-width:0"
+            onkeydown="if(event.key==='Enter'){lmEdgeApply();}"
+            onblur="lmEdgeApply()">
+          <label style="display:flex;align-items:center;gap:2px;cursor:pointer;flex-shrink:0;font-size:10px;color:#9CA3AF;white-space:nowrap">
+            <input type="checkbox" id="lmEdgeYRepeat" style="accent-color:#60A5FA;width:13px;height:13px;cursor:pointer" onchange="lmEdgeApply()">반복
+          </label>
+          <button onclick="lmEdgeApply()" style="background:#1D4ED8;color:#fff;border:none;border-radius:3px;padding:4px 7px;cursor:pointer;font-size:10px;font-weight:700;font-family:'맑은 고딕',sans-serif;flex-shrink:0">확인</button>
+        </div>
+
+        <div class="lmp-row" style="gap:4px;margin-top:4px;align-items:center">
+          <select id="lmGridDimSlot" onchange="lmAutoLoadGridDims()"
+            style="flex:1;min-width:0;background:#1A1D23;color:#CDD0D6;border:1px solid #252830;border-radius:3px;padding:4px;font-size:10px;font-family:'맑은 고딕',sans-serif;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+            <option value="">— 선택안함 —</option>
+          </select>
+          <button onclick="lmDeleteGridDims()" title="선택한 항목 삭제"
+            style="background:#7F1D1D;color:#FCA5A5;border:none;border-radius:3px;padding:4px 5px;cursor:pointer;font-size:10px;font-weight:700;font-family:'맑은 고딕',sans-serif;flex-shrink:0">🗑 삭제</button>
+        </div>
+        <div id="lmGridDimStatus" style="font-size:10px;color:#6B7280;margin-top:4px;text-align:center"></div>
+      </div>
+
+      <!-- ▌라인 굵기 -->
+      <div class="lmp-sec">
+        <div class="lmp-title">━ 라인 굵기</div>
+        <div class="lmp-slrow"><span class="lmp-lbl">조각</span>
+          <input id="lmPartLW" type="range" min="1" max="12" step="0.5" value="2" style="flex:1;accent-color:#34D399;cursor:pointer" oninput="document.getElementById('lmPartLWVal').textContent=this.value;lmDraw()">
+          <span id="lmPartLWVal" class="lmp-val" style="color:#34D399">2</span>
+        </div>
+        <div class="lmp-slrow"><span class="lmp-lbl">그리드</span>
+          <input id="lmGridLW" type="range" min="0.5" max="4" step="0.5" value="1" style="flex:1;accent-color:#9CA3AF;cursor:pointer" oninput="document.getElementById('lmGridLWVal').textContent=this.value;lmDraw()">
+          <span id="lmGridLWVal" class="lmp-val" style="color:#9CA3AF">1</span>
+        </div>
+        <div class="lmp-slrow"><span class="lmp-lbl">원자재</span>
+          <input id="lmPanelLW" type="range" min="1" max="12" step="0.5" value="3" style="flex:1;accent-color:#60A5FA;cursor:pointer" oninput="document.getElementById('lmPanelLWVal').textContent=this.value;lmDraw()">
+          <span id="lmPanelLWVal" class="lmp-val" style="color:#60A5FA">3</span>
+        </div>
+      </div>
+
+      <!-- ▌텍스트 크기 -->
+      <div class="lmp-sec">
+        <div class="lmp-title">✎ 텍스트 크기</div>
+        <div class="lmp-slrow"><span class="lmp-lbl">조각이름</span>
+          <input id="lmNameFS" type="range" min="6" max="32" step="1" value="14" style="flex:1;accent-color:#FBBF24;cursor:pointer" oninput="document.getElementById('lmNameFSVal').textContent=this.value;lmDraw()">
+          <span id="lmNameFSVal" class="lmp-val" style="color:#FBBF24">14</span>
+        </div>
+        <div class="lmp-slrow"><span class="lmp-lbl">치수숫자</span>
+          <input id="lmDimFS" type="range" min="5" max="24" step="1" value="11" style="flex:1;accent-color:#F87171;cursor:pointer" oninput="document.getElementById('lmDimFSVal').textContent=this.value;lmDraw()">
+          <span id="lmDimFSVal" class="lmp-val" style="color:#F87171">11</span>
+        </div>
+      </div>
+
+      <!-- ▌회전 / 반전 -->
+      <div class="lmp-sec">
+        <div class="lmp-title">↺ 회전 / 반전</div>
+        <div style="display:flex;gap:5px">
+          <button id="lmBtnTurn"  onclick="lmDoTurn()"    class="lmp-flipbtn">Turn</button>
+          <button id="lmBtnFlipX" onclick="lmDoFlip('x')" class="lmp-flipbtn">⇔X</button>
+          <button id="lmBtnFlipY" onclick="lmDoFlip('y')" class="lmp-flipbtn">⇕Y</button>
+        </div>
+      </div>
+
+    </div><!-- /lmPalBody -->
+  </div><!-- /lmPal -->
+
+  <!-- 패널 숨김 시 표시할 복원 버튼 -->
+  <button id="lmPalShowBtn" onclick="lmTogglePal()"
+    style="display:none;position:absolute;right:0;top:50%;transform:translateY(-50%);
+           background:#12141A;color:#60A5FA;border:1px solid #1E2130;border-radius:6px 0 0 6px;
+           padding:10px 5px;cursor:pointer;font-size:18px;writing-mode:vertical-rl;
+           font-family:'맑은 고딕',sans-serif;font-weight:700;z-index:21;letter-spacing:1px">⊹</button>
 </div>
 
 <input type="file" id="fileInp" accept=".json" style="display:none" onchange="onFileLoad(event)">
@@ -716,19 +1126,18 @@ body{font-family:var(--font);background:var(--bg);color:var(--tx);height:100vh;o
   <div class="mbs" style="justify-content:center"><button class="mb_ p" id="soOk" style="padding:8px 32px">확인</button></div>
 </div></div>
 
-<!-- 요약 팝업 모달 -->
-<div class="mo" id="sumMo">
-<div class="mc" style="max-width:340px">
-  <div class="mct">📋 배치 요약<button class="mcl" onclick="cmo('sumMo')">✕</button></div>
-  <div id="sumC"></div>
-  <div class="mbs"><button class="mb_ s" onclick="cmo('sumMo')">닫기</button></div>
-</div></div>
 
 <div id="toast"></div>
 
 <script>
 /* === 상수 === */
-const COLORS=["#E03131","#C2255C","#9C36B5","#6741D9","#3B5BDB","#1971C2","#0B7285","#087F5B","#2B8A3E","#5C940D","#E67700","#D9480F","#F03E3E","#D6336C","#AE3EC9","#7048E8","#4263EB","#1C7ED6","#1098AD","#0CA678","#37B24D","#74B816","#F59F00","#F76707"];
+/* 색상 팔레트: 짝수=난색(빨/주/황), 홀수=한색(파/청/초록) 교번 → 인접 조각 항상 반대 계열 */
+const COLORS=[
+  "#E03131","#1971C2","#2B8A3E","#E67700","#6741D9","#0B7285",
+  "#C2255C","#F59F00","#087F5B","#4263EB","#D9480F","#74B816",
+  "#1098AD","#9C36B5","#3B5BDB","#D6336C","#37B24D","#7048E8",
+  "#F03E3E","#0CA678","#AE3EC9","#F76707","#1C7ED6","#5C940D",
+];
 let cidx=0;
 function nc(){return COLORS[cidx++%COLORS.length];}
 function cc(h){const r=parseInt(h.slice(1,3),16),g=parseInt(h.slice(3,5),16),b=parseInt(h.slice(5,7),16);return(r*299+g*587+b*114)/1000>180?"#333":"#FFF";}
@@ -780,8 +1189,169 @@ let curFilm=0,cvS=1,cvX=0,cvY=0,fS=1,fX=0,fY=0,fF=0;
 let flipX=[],flipY=[],turnSt=[]; // PC앱 flip_x/flip_y/turn_states
 let calcT=null,CU="",_cTgt={pi:-1,ji:-1};
 let lineMode=false,gridMode=false;
-let _sumBox=null;   // 메인 캔버스 요약 박스 좌표
-let _fSumBox=null;  // Full 캔버스 요약 박스 좌표
+
+
+/* === 조각 드래그 상태 === */
+let _dragPiece=null; // {pi, placedIdx, startMx, startMy, startPx, startPy, origX, origY, curX, curY, dragging, free, snapX, snapY}
+let _freePieces={};  // {fi: {placedIdx: {x,y,rotated}}} — 드래그로 자유배치된 조각들
+let _rotBtnState=null;  // {fi, idx} — 미리보기 회전버튼 대상
+let _fRotBtnState=null; // {fi, idx} — Full창 회전버튼 대상
+let _activeDragIdx=-1;  // 현재 드래그 중인 placed 인덱스 (-1이면 드래그 없음)
+
+/* ── 회전버튼 표시/숨김 ── */
+function _showRotBtn(btnId,sc,fi,idx){
+  const btn=document.getElementById(btnId);if(!btn)return;
+  if(!results.length||fi>=results.length){btn.classList.remove("on");return;}
+  const pos=_getPlacedPos(fi,idx);if(!pos){btn.classList.remove("on");return;}
+  if(_isSquare(pos.origL,pos.origW)){btn.classList.remove("on");return;}
+  // 회전 가능 여부 확인 (현재 위치에서 90° 회전했을 때 맞는 여백이 있는지)
+  if(!_canRotate(fi,idx)){btn.classList.remove("on");return;}
+  // 조각 중앙 픽셀 좌표
+  const px=sc.ox+pos.x*sc.scale+pos.l*sc.scale/2;
+  const py=sc.oy+pos.y*sc.scale+pos.w*sc.scale/2;
+  // 캔버스 크기 가져오기 (버튼 ID로 캔버스 구분)
+  const canvasEl=(btnId==="cvRotBtn")?document.getElementById("cv"):document.getElementById("fullCv");
+  const cw=canvasEl?canvasEl.width:9999,ch=canvasEl?canvasEl.height:9999;
+  const halfBtn=20;
+  // 원자재 영역 내부로 클램프 (캔버스 경계와 원자재 경계 모두 고려)
+  const panelX1=sc.ox,panelX2=sc.ox+pos.origL*sc.scale*999; // 대략적 우측
+  const clampedX=Math.max(halfBtn,Math.min(cw-halfBtn,px));
+  const clampedY=Math.max(halfBtn,Math.min(ch-halfBtn,py));
+  btn.style.left=clampedX+"px";
+  btn.style.top=clampedY+"px";
+  btn.classList.add("on");
+}
+function _hideRotBtn(btnId){
+  const btn=document.getElementById(btnId);if(btn)btn.classList.remove("on");
+}
+function _updRotBtn(){
+  if(_rotBtnState){
+    const sc=_cvScale();
+    if(sc)_showRotBtn("cvRotBtn",sc,_rotBtnState.fi,_rotBtnState.idx);
+    else _hideRotBtn("cvRotBtn");
+  } else {_hideRotBtn("cvRotBtn");}
+  if(_fRotBtnState){
+    const fsc=_fScale();
+    if(fsc)_showRotBtn("fRotBtn",fsc,_fRotBtnState.fi,_fRotBtnState.idx);
+    else _hideRotBtn("fRotBtn");
+  } else {_hideRotBtn("fRotBtn");}
+}
+// hiddenPieces[fi] = Set of placed-index that are hidden
+let hiddenPieces=[];   // index per film
+
+/* === Undo / Redo 스택 === */
+const MAX_UNDO=50;
+let _undoStack=[];
+let _redoStack=[];
+
+function _snapState(){
+  // freePieces: {fi: {idx: {x,y,rotated}}} 직렬화
+  const fpSerial={};
+  Object.keys(_freePieces).forEach(fi=>{
+    fpSerial[fi]={};
+    Object.keys(_freePieces[fi]).forEach(idx=>{
+      fpSerial[fi][idx]={..._freePieces[fi][idx]};
+    });
+  });
+  return JSON.stringify({
+    site_name:document.getElementById("siteName")?.value||"",
+    panels:panels.map(p=>({...p})),
+    parts:parts.map(ps=>ps.map(p=>({...p}))),
+    flipX:flipX.slice(),flipY:flipY.slice(),turnSt:turnSt.slice(),
+    hiddenPieces:hiddenPieces.map(s=>s?[...s]:[]),
+    freePieces:fpSerial,
+    rotBtnState:_rotBtnState?{..._rotBtnState}:null
+  });
+}
+
+/* ── pushUndo: 입력 변경 직전 상태를 저장 (schedCalc 호출 전에 명시적으로 호출) ── */
+let _lastPushedSnap="";   // 중복 push 방지용 캐시
+function pushUndo(){
+  // 로그인 직후 panels/parts 가 완전히 구성되기 전엔 저장하지 않음
+  if(!panels.length||!parts.length)return;
+  // 유효한 데이터(치수가 입력된 패널)가 하나라도 있어야 저장
+  const hasData=panels.some(p=>parseFloat(p.length)>0&&parseFloat(p.width)>0);
+  if(!hasData)return;
+  const snap=_snapState();
+  if(snap===_lastPushedSnap)return;   // 변경 없으면 스킵
+  _lastPushedSnap=snap;
+  _undoStack.push(snap);
+  if(_undoStack.length>MAX_UNDO)_undoStack.shift();
+  _redoStack=[];
+  _updUndoRedoBtns();
+}
+
+function _applySnap(snap){
+  const d=JSON.parse(snap);
+  if(document.getElementById("siteName"))document.getElementById("siteName").value=d.site_name||"";
+  panels=(d.panels||[]).map(p=>({...p}));
+  parts=(d.parts||[]).map(ps=>ps.map(p=>({...p})));
+  flipX=(d.flipX||[]).slice();flipY=(d.flipY||[]).slice();turnSt=(d.turnSt||[]).slice();
+  hiddenPieces=(d.hiddenPieces||[]).map(a=>new Set(a));
+  while(flipX.length<panels.length)flipX.push(false);
+  while(flipY.length<panels.length)flipY.push(false);
+  while(turnSt.length<panels.length)turnSt.push(false);
+  // freePieces 복원
+  _freePieces={};
+  if(d.freePieces){
+    Object.keys(d.freePieces).forEach(fi=>{
+      _freePieces[fi]={};
+      Object.keys(d.freePieces[fi]).forEach(idx=>{
+        _freePieces[fi][idx]={...d.freePieces[fi][idx]};
+      });
+    });
+  }
+  // 드래그/회전 상태 초기화 (Undo/Redo 중엔 드래그 취소)
+  _dragPiece=null;_fTDrag=null;
+  _rotBtnState=d.rotBtnState?{...d.rotBtnState}:null;
+  _fRotBtnState=_rotBtnState?{..._rotBtnState}:null;
+  // Undo/Redo 적용 중엔 schedCalc 타이머를 건드리지 않고 직접 렌더
+  clearTimeout(calcT);
+  renderPanelTbl();
+  document.getElementById("partsSecs").innerHTML="";
+  panels.forEach((_,i)=>document.getElementById("partsSecs").appendChild(buildSec(i)));
+  calcLayout();
+  renderFTabs();_updFlipBtns();drawCV();updIB();
+  // 회전버튼 갱신
+  _updRotBtn();
+  // 데이터 변경 → 갱신 버튼 글로우
+
+  // 적용 후 현재 상태를 lastPushedSnap에 동기화 (적용 직후 중복 push 방지)
+  _lastPushedSnap=_snapState();
+}
+
+function doUndo(){
+  if(!_undoStack.length)return;
+  // 현재 상태를 redo 스택에 저장 (Redo 가능하도록)
+  const cur=_snapState();
+  _redoStack.push(cur);
+  const snap=_undoStack.pop();
+  _applySnap(snap);
+  _updUndoRedoBtns();
+  toast("↩ Undo");
+}
+function doRedo(){
+  if(!_redoStack.length)return;
+  const cur=_snapState();
+  _undoStack.push(cur);
+  const snap=_redoStack.pop();
+  _applySnap(snap);
+  _updUndoRedoBtns();
+  toast("↪ Redo");
+}
+function _updUndoRedoBtns(){
+  const canU=_undoStack.length>0,canR=_redoStack.length>0;
+  ["btnUndo","fBtnUndo","lmBtnUndo","cvBtnUndo"].forEach(id=>{
+    const b=document.getElementById(id);
+    if(!b)return;
+    b.disabled=!canU;b.style.opacity=canU?"1":"0.38";
+  });
+  ["btnRedo","fBtnRedo","lmBtnRedo","cvBtnRedo"].forEach(id=>{
+    const b=document.getElementById(id);
+    if(!b)return;
+    b.disabled=!canR;b.style.opacity=canR?"1":"0.38";
+  });
+}
 
 /* === 초기화 === */
 window.addEventListener("DOMContentLoaded",()=>{
@@ -798,6 +1368,20 @@ window.addEventListener("DOMContentLoaded",()=>{
       document.querySelectorAll(".mi.open").forEach(m=>m.classList.remove("open"));
   });
   buildCG();initRZ();
+  // Ctrl+Z / Ctrl+Y (Undo/Redo) 전역 단축키
+  document.addEventListener("keydown",e=>{
+    if(e.ctrlKey&&(e.key==="z"||e.key==="Z")&&!e.shiftKey){
+      // Line Mode가 열려있을 때는 lmKeyDown이 처리하므로 메인창만
+      if(document.getElementById("lineMo")?.style.display==="none"){
+        e.preventDefault();doUndo();
+      }
+    }
+    if(e.ctrlKey&&((e.key==="y"||e.key==="Y")||(e.key==="z"&&e.shiftKey))){
+      if(document.getElementById("lineMo")?.style.display==="none"){
+        e.preventDefault();doRedo();
+      }
+    }
+  });
 });
 
 /* === 메뉴 토글 === */
@@ -815,63 +1399,86 @@ function menuAction(fn, e){
 }
 
 /* === 로그인 === */
+/* 로그인 실패 횟수 제한 (브루트포스 방어) — 메모리 기반 */
+const _loginFail={count:0,lockedUntil:0};
+const _LOGIN_MAX=5,_LOGIN_LOCK_MS=60000; // 5회 실패 시 60초 잠금
+
 async function doLogin(){
   const uid=document.getElementById("lUid").value.trim(),pwd=document.getElementById("lPwd").value.trim();
   if(!uid||!pwd){showLE("아이디와 비밀번호를 입력하세요.");return;}
-  const btn=document.getElementById("lBtn");btn.textContent="확인 중...";btn.disabled=true;
-  let w=0;
-  while(!window._fbReady&&w<100){
-    if(w===20) btn.textContent="저장소 연결 중...";
-    await new Promise(r=>setTimeout(r,100));
-    w++;
-  }
-  if(!window._fbReady){showLE("저장소 연결 실패. 인터넷 연결을 확인 후 새로고침 하세요.");btn.textContent="로그인";btn.disabled=false;return;}
-  const users=await window._fbGetUsers();
-  if(!Object.keys(users).length){showLE("계정 정보를 불러올 수 없습니다. 새로고침 후 시도하세요.");btn.textContent="로그인";btn.disabled=false;return;}
 
-  /* 입력 비밀번호를 SHA-256 해시로 변환 후 비교 */
+  /* 잠금 상태 확인 */
+  if(_loginFail.lockedUntil>Date.now()){
+    const sec=Math.ceil((_loginFail.lockedUntil-Date.now())/1000);
+    showLE(`로그인 시도가 너무 많습니다. ${sec}초 후 다시 시도하세요.`);
+    return;
+  }
+
+  const btn=document.getElementById("lBtn");btn.textContent="확인 중...";btn.disabled=true;
+  let w=0;while(!window._fbReady&&w<40){await new Promise(r=>setTimeout(r,100));w++;}
+  if(!window._fbReady){showLE("서버 연결 실패. 새로고침 후 시도하세요.");btn.textContent="로그인";btn.disabled=false;return;}
+
+  /* 해당 사용자 해시만 조회 (전체 목록 조회 불필요) */
+  const storedHash = await window._fbGetUserHash(uid);
+
+  /* 입력 비밀번호 SHA-256 변환 */
   const pwHash = window._sha256 ? await window._sha256(pwd) : pwd;
 
-  /* 기존 평문 저장 계정 자동 마이그레이션 지원
-     — 저장값이 64자(해시) 이면 해시비교, 아니면 평문비교 후 해시로 업그레이드 */
   let matched = false;
-  if(users[uid]){
-    const stored = users[uid];
-    if(stored.length === 64){
-      matched = stored === pwHash;
+  if(storedHash){
+    if(storedHash.length === 64){
+      matched = storedHash === pwHash;
     } else {
-      /* 평문 계정 — 일치하면 해시로 자동 업그레이드 */
-      if(stored === pwd){
+      /* 평문 계정 자동 마이그레이션 (구버전 호환) */
+      if(storedHash === pwd){
         matched = true;
-        users[uid] = pwHash;
-        if(window._fbSaveUsers) window._fbSaveUsers(users);
+        await window._fbUpsertUser(uid, pwHash);
       }
     }
   }
 
   if(matched){
+    /* 로그인 성공 — 실패 카운터 초기화 */
+    _loginFail.count=0;_loginFail.lockedUntil=0;
     const ri=document.getElementById("remId").checked,rp=document.getElementById("remPw").checked;
-    localStorage.setItem("cut_ri",ri?"1":"0");
-    localStorage.setItem("cut_rp",rp?"1":"0");
-    localStorage.setItem("cut_uid",ri?uid:"");
-    /* 비밀번호는 해시값으로 저장 (평문 저장 안 함) */
-    localStorage.setItem("cut_pw",rp?pwHash:"");
+    try{
+      localStorage.setItem("cut_ri",ri?"1":"0");
+      localStorage.setItem("cut_rp",rp?"1":"0");
+      localStorage.setItem("cut_uid",ri?uid:"");
+      /* 비밀번호는 해시값으로 저장 (평문 저장 안 함) */
+      localStorage.setItem("cut_pw",rp?pwHash:"");
+    }catch(e){}
     CU=uid;document.getElementById("cuser").textContent=uid;
     document.getElementById("LS").style.display="none";
     document.getElementById("AS").classList.add("on");
     initCanvas();addPanel();
-    autoLoad();
+    _undoStack=[];_redoStack=[];_lastPushedSnap="";_updUndoRedoBtns();
+    setTimeout(()=>{
+      autoLoad();
+      setTimeout(()=>{_undoStack=[];_redoStack=[];_lastPushedSnap="";_updUndoRedoBtns();},1200);
+    },800);
   }else{
-    showLE("아이디 또는 비밀번호가 일치하지 않습니다.");
+    /* 로그인 실패 — 카운터 증가 */
+    _loginFail.count++;
+    if(_loginFail.count>=_LOGIN_MAX){
+      _loginFail.lockedUntil=Date.now()+_LOGIN_LOCK_MS;
+      showLE(`로그인 ${_LOGIN_MAX}회 실패. 1분간 잠깁니다.`);
+    } else {
+      showLE(`아이디 또는 비밀번호가 일치하지 않습니다. (${_loginFail.count}/${_LOGIN_MAX})`);
+    }
     btn.textContent="로그인";btn.disabled=false;
   }
 }
 function doLogout(){
+  /* 민감 데이터 메모리에서 클리어 */
+  window._gist_token="";window._gist_id="";
+  _uListCache=[];
   CU="";document.getElementById("AS").classList.remove("on");
   document.getElementById("LS").style.display="";
   document.getElementById("lPwd").value="";
   const btn=document.getElementById("lBtn");btn.textContent="로그인";btn.disabled=false;
   panels=[];parts=[];results=[];cidx=0;
+  _undoStack=[];_redoStack=[];_lastPushedSnap="";_updUndoRedoBtns();
 }
 async function doClose(){
   /* 원본파일 closeAndSave()와 동일: 저장 후 '클라우드저장완료' 표시 → 로그인 화면으로 복귀 */
@@ -1185,19 +1792,31 @@ function appendCRow(pi,ji,tbl){
 function addPart(pi){
   parts[pi].push({name:"",length:"",width:"",quantity:1,color:nc()});
   rebuildSec(pi);schedCalc();
-  // 새 행 이름 셀로 포커스 — 단, 이미 다른 셀(수량 등)이 포커스를 받은 경우 빼앗지 않음
   setTimeout(()=>{
     const t=document.getElementById(`ct_${pi}`);if(!t)return;
     const rows=t.querySelectorAll(".crow");const last=rows[rows.length-1];if(!last)return;
     const active=document.activeElement;
-    // 포커스가 이 섹션 내부에 있으면 이동하지 않음
     if(active&&t.contains(active))return;
     last.querySelector("input").focus();
   },50);
 }
+
+/* 각 패널 섹션에 빈 행(길이·폭 모두 비어있는 행)이 항상 1개 이상 유지되도록 보장 */
+function _ensureBlankRow(pi){
+  if(!parts[pi])return;
+  const hasBlank=parts[pi].some(pt=>!parseFloat(pt.length)&&!parseFloat(pt.width));
+  if(!hasBlank){
+    parts[pi].push({name:"",length:"",width:"",quantity:1,color:nc()});
+    rebuildSec(pi);
+  }
+}
+
 function removePart(pi,ji){
   if(parts[pi].length<=1){toast("조각은 최소 1개 필요합니다");return;}
-  parts[pi].splice(ji,1);rebuildSec(pi);schedCalc();
+  parts[pi].splice(ji,1);
+  // 삭제 후 빈 행이 없으면 자동 추가
+  _ensureBlankRow(pi);
+  rebuildSec(pi);schedCalc();
 }
 // 마지막 행 길이+폭 모두 입력(blur) 완료 시에만 새 행 자동 추가
 function chkAddPart(pi,ji){
@@ -1528,8 +2147,106 @@ function mkBtn(cls,txt,onClick){
   b.addEventListener("click",onClick);return b;
 }
 
-/* === 알고리즘 (PC앱 동일) === */
-function bestFit(panel,pts,noRot=false){
+/* === 알고리즘 (Maximal Rectangle + Guillotine 혼합) === */
+
+/* ── Maximal Rectangle 알고리즘 ──────────────────────────────────
+   Binary grid 기반으로 가장 큰 빈 직사각형을 찾아 배치.
+   Guillotine fallback보다 촘촘한 배치를 보장. */
+/* ── MAXRECTS-BSSF (Best Short Side Fit) ──────────────────────────
+   Jukka Jylänki "A Thousand Ways to Pack the Bin" 구현체.
+   freeRects 리스트를 유지하며 배치 후 교차 분할·가지치기 수행.
+   Guillotine보다 촘촘한 2D 배치를 보장. */
+function maxRectFit(panel,pts,noRot=false){
+  const BW=panel.length, BH=panel.width;
+
+  // freeRects: 사용 가능한 직사각형 [{x,y,w,h}]
+  let freeRects=[{x:0,y:0,w:BW,h:BH}];
+
+  const all=[];
+  pts.forEach(p=>{for(let k=0;k<(p.quantity||1);k++)all.push({...p});});
+  all.sort((a,b)=>b.length*b.width-a.length*a.width);
+
+  const placed=[];
+
+  // 두 사각형이 교차하는지 확인
+  function intersects(a,b){
+    return a.x<b.x+b.w && a.x+a.w>b.x &&
+           a.y<b.y+b.h && a.y+a.h>b.y;
+  }
+
+  // 배치된 사각형 placed로 freeRect f를 분할 → 새 사각형 목록 반환
+  function splitFreeRect(f,p){
+    // p가 f와 교차하지 않으면 f 그대로 반환
+    if(!intersects(f,p)) return [f];
+    const result=[];
+    // 왼쪽
+    if(p.x>f.x)           result.push({x:f.x,       y:f.y, w:p.x-f.x,              h:f.h});
+    // 오른쪽
+    if(p.x+p.w<f.x+f.w)  result.push({x:p.x+p.w,   y:f.y, w:f.x+f.w-(p.x+p.w),   h:f.h});
+    // 위
+    if(p.y>f.y)           result.push({x:f.x, y:f.y,        w:f.w, h:p.y-f.y});
+    // 아래
+    if(p.y+p.h<f.y+f.h)  result.push({x:f.x, y:p.y+p.h,    w:f.w, h:f.y+f.h-(p.y+p.h)});
+    return result;
+  }
+
+  // 다른 freeRect에 완전히 포함된 rect 제거
+  function pruneFreeRects(){
+    const keep=[];
+    outer:for(let i=0;i<freeRects.length;i++){
+      const a=freeRects[i];
+      if(a.w<1||a.h<1) continue;
+      for(let j=0;j<freeRects.length;j++){
+        if(i===j) continue;
+        const b=freeRects[j];
+        if(b.x<=a.x && b.y<=a.y && b.x+b.w>=a.x+a.w && b.y+b.h>=a.y+a.h) continue outer;
+      }
+      keep.push(a);
+    }
+    freeRects=keep;
+  }
+
+  all.forEach(pt=>{
+    const ors=noRot?[[pt.length,pt.width]]:[[pt.length,pt.width],[pt.width,pt.length]];
+    let best=null, bestScore=Infinity;
+
+    freeRects.forEach(f=>{
+      ors.forEach(([pl,pw])=>{
+        if(pl<=f.w && pw<=f.h){
+          // 좌→우 배치: x 위치를 최우선, y 위치 차선, 나머지 여백 최소화
+          // x가 작을수록(왼쪽) 먼저, 동일 x면 y가 작을수록(위) 먼저
+          const score = f.x * 1e12 + f.y * 1e6 + Math.min(f.w-pl,f.h-pw)*100 + Math.max(f.w-pl,f.h-pw);
+          if(score<bestScore){bestScore=score; best={x:f.x,y:f.y,pl,pw};}
+        }
+      });
+    });
+
+    if(best){
+      const placed_rect={x:best.x, y:best.y, w:best.pl, h:best.pw};
+      placed.push({x:best.x, y:best.y, length:best.pl, width:best.pw,
+                   color:pt.color, name:pt.name, _ji:pt._ji});
+
+      // freeRects 분할
+      const newFree=[];
+      for(const f of freeRects){
+        const splits=splitFreeRect(f, placed_rect);
+        for(const s of splits) if(s.w>0&&s.h>0) newFree.push(s);
+      }
+      freeRects=newFree;
+      pruneFreeRects();
+    }
+  });
+
+  // 잔여 영역: freeRects를 그대로 반환
+  const remaining=freeRects
+    .filter(r=>r.w>=2&&r.h>=2)
+    .map(r=>[r.x,r.y,r.w,r.h]);
+
+  return{placed,remaining};
+}
+
+/* ── Guillotine (기존) — 폴백/비교용으로 유지 ── */
+function guillotineFit(panel,pts,noRot=false){
   const all=[];pts.forEach(p=>{for(let k=0;k<(p.quantity||1);k++)all.push({...p});});
   all.sort((a,b)=>b.length*b.width-a.length*a.width);
   const placed=[];let areas=[[0,0,panel.length,panel.width]];
@@ -1538,31 +2255,48 @@ function bestFit(panel,pts,noRot=false){
     areas.forEach(([ax,ay,aw,ah],i)=>{
       const ors=noRot?[[pt.length,pt.width]]:[[pt.length,pt.width],[pt.width,pt.length]];
       ors.forEach(([pl,pw])=>{
-        if(pl<=aw&&pw<=ah){const ex=(Math.abs(pl-aw)<.1||Math.abs(pw-ah)<.1);let d=aw*ah-pl*pw;if(ex)d-=1e6;if(d<md){md=d;bi=i;bo=[pl,pw];}}
+        // 좌→우: x 최소 우선, 동일x면 y 최소, 그 다음 여백 최소
+        if(pl<=aw&&pw<=ah){
+          const score=ax*1e12+ay*1e6+(aw*ah-pl*pw);
+          if(score<md){md=score;bi=i;bo=[pl,pw];}
+        }
       });
     });
     if(bi!==-1){
       const[ax,ay,aw,ah]=areas.splice(bi,1)[0];const[pl,pw]=bo;
-      placed.push({x:ax,y:ay,length:pl,width:pw,color:pt.color,name:pt.name});
+      placed.push({x:ax,y:ay,length:pl,width:pw,color:pt.color,name:pt.name,_ji:pt._ji});
       if(aw-pl>ah-pw){if(aw>pl+.1)areas.push([ax+pl,ay,aw-pl,ah]);if(ah>pw+.1)areas.push([ax,ay+pw,pl,ah-pw]);}
       else{if(ah>pw+.1)areas.push([ax,ay+pw,aw,ah-pw]);if(aw>pl+.1)areas.push([ax+pl,ay,aw-pl,pw]);}
-      areas.sort((a,b)=>a[2]*a[3]-b[2]*b[3]);
+      // 좌→우 정렬 유지
+      areas.sort((a,b)=>a[0]!==b[0]?a[0]-b[0]:a[1]-b[1]);
     }
   });
   return{placed,remaining:areas};
+}
+
+/* ── bestFit: MaxRect 우선, 배치 수 적으면 Guillotine 비교 후 더 나은 것 선택 ── */
+function bestFit(panel,pts,noRot=false){
+  const mr=maxRectFit(panel,pts,noRot);
+  const gl=guillotineFit(panel,pts,noRot);
+  // 더 많이 배치한 알고리즘 선택 (동수면 MaxRect)
+  return mr.placed.length>=gl.placed.length?mr:gl;
 }
 function calcLayout(){
   results=[];
   panels.forEach((p,i)=>{
     if(!parseFloat(p.length)||!parseFloat(p.width))return;
     const st=_adjGetState(i);
-    const ps=(parts[i]||[]).filter(pt=>parseFloat(pt.length)>0&&parseFloat(pt.width)>0).map(pt=>{
-      if(st.val>0){
-        const{l,w}=_adjApply(parseFloat(pt.length),parseFloat(pt.width),st.mode,st.val);
-        return{...pt,length:l,width:w};
-      }
-      return pt;
-    });
+    // _ji: parts[i] 배열에서의 원본 인덱스 — 더블클릭 삭제 시 역추적용
+    const ps=(parts[i]||[])
+      .map((pt,ji)=>({...pt,_ji:ji}))            // 먼저 원본 인덱스 태그
+      .filter(pt=>parseFloat(pt.length)>0&&parseFloat(pt.width)>0)
+      .map(pt=>{
+        if(st.val>0){
+          const{l,w}=_adjApply(parseFloat(pt.length),parseFloat(pt.width),st.mode,st.val);
+          return{...pt,length:l,width:w};
+        }
+        return pt;
+      });
     let pLen=parseFloat(p.length),pWid=parseFloat(p.width);
     const fx=flipX[i]||false,fy=flipY[i]||false,tu=turnSt[i]||false;
     if(fx){const tmp=pLen;pLen=pWid;pWid=tmp;} // Flip X: 가로↔세로 교환
@@ -1579,7 +2313,38 @@ function calcLayout(){
     results.push({panel:{...p,length:pLen,width:pWid},placed,remaining});
   });
   if(curFilm>=results.length)curFilm=Math.max(0,results.length-1);
-
+  // hiddenPieces 배열 크기 동기화
+  while(hiddenPieces.length<results.length)hiddenPieces.push(new Set());
+  if(hiddenPieces.length>results.length)hiddenPieces.length=results.length;
+  // freePieces 유효성 검사 — placed 범위를 벗어난 인덱스 제거
+  Object.keys(_freePieces).forEach(fi=>{
+    const fiNum=parseInt(fi);
+    if(fiNum>=results.length){delete _freePieces[fi];return;}
+    const maxIdx=results[fiNum].placed.length;
+    Object.keys(_freePieces[fi]).forEach(idx=>{
+      if(parseInt(idx)>=maxIdx)delete _freePieces[fi][idx];
+    });
+  });
+  // freePieces 겹침 검사 — 재계산 후 새 placed와 겹치면 freePiece 위치를 placed 원래 위치로 리셋
+  results.forEach((res,fiNum)=>{
+    const fp=_freePieces[fiNum];if(!fp)return;
+    Object.keys(fp).forEach(idxStr=>{
+      const idx=parseInt(idxStr);
+      const fpp=fp[idx];if(!fpp)return;
+      const p=res.placed[idx];if(!p)return;
+      const fLen=fpp.rotated?p.width:p.length;
+      const fWid=fpp.rotated?p.length:p.width;
+      const panel=res.panel;
+      // 원자재 경계 초과 → 리셋
+      if(fpp.x<0||fpp.y<0||fpp.x+fLen>panel.length+0.5||fpp.y+fWid>panel.width+0.5){
+        delete fp[idxStr];return;
+      }
+      // 다른 조각과 겹침 → 리셋
+      if(_overlapsOther(fiNum,idx,fpp.x,fpp.y,fLen,fWid)){
+        delete fp[idxStr];
+      }
+    });
+  });
   // ── Python _generate_layout_actual 루프 대응:
   // 배치 결과 후 누락 조각 힌트를 패널별로 자동 갱신 (_validating 중에는 skip)
   if(!_validating){
@@ -1634,41 +2399,508 @@ function calcLayout(){
       }
     }
     renderFTabs();drawCV();updIB();
+
+    // 각 패널 섹션에 빈 행 1개 이상 유지
+    panels.forEach((_,pi)=>{if(parts[pi])_ensureBlankRow(pi);});
+
+    // ── 데이터 변경 시 갱신 버튼 글로우 활성화 ──
+  
   }
 }
-function schedCalc(){clearTimeout(calcT);calcT=setTimeout(calcLayout,200);schedAutoSave();}
+
+
+/* === 요약 팝업 시스템 === */
+/* 요약 내용 HTML 생성 (공통) */
+function _buildSumHtml(hiFilm){
+  if(!results.length){
+    return "<p style='color:#868E96;font-size:13px;padding:14px 0;text-align:center'>배치된 조각이 없습니다.<br><span style='font-size:11px'>치수를 입력하면 자동으로 계산됩니다.</span></p>";
+  }
+  const hi=hiFilm!==undefined?hiFilm:curFilm;
+  let html="";
+  results.forEach((r,i)=>{
+    const u=r.placed.length?Math.max(...r.placed.map(p=>p.x+p.length)):0;
+    const rm=Math.max(0,r.panel.length-u),ratio=r.panel.length?(u/r.panel.length*100).toFixed(1):0;
+    html+=`<div style="background:var(--cv);border:${i===hi?"2px solid var(--ac)":"1px solid var(--ln)"};border-radius:6px;padding:10px;margin-bottom:8px">
+      <div style="font-size:12px;font-weight:700;color:var(--hd);margin-bottom:6px">${i+1}. ${esc(r.panel.name||"Film")}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:11px;margin-bottom:6px">
+        <div><span style="color:#868E96">총길이 </span><b>${fd(r.panel.length/1000)}m</b></div>
+        <div><span style="color:#868E96">총폭 </span><b>${fd(r.panel.width/1000)}m</b></div>
+        <div><span style="color:#868E96">사용 </span><b style="color:var(--ac)">${fd(u/1000)}m</b></div>
+        <div><span style="color:#868E96">잔여 </span><b style="color:var(--sc)">${fd(rm/1000)}m</b></div>
+        <div><span style="color:#868E96">조각 </span><b>${r.placed.length}개</b></div>
+        <div><span style="color:#868E96">사용률 </span><b>${ratio}%</b></div>
+      </div>
+      <div style="background:var(--ln);border-radius:3px;height:4px;overflow:hidden"><div style="height:100%;background:linear-gradient(90deg,#343A40,#339AF0);width:${ratio}%"></div></div>
+    </div>`;
+  });
+  return html;
+}
+
+/* 팝업 열기 + 내용 갱신 (항상 최신) */
+function openSumPopup(focusFilm){
+  const mo=document.getElementById("sumMo");
+  // body 마지막으로 이동 → DOM 순서상 항상 최상위에 렌더링
+  document.body.appendChild(mo);
+  document.getElementById("sumC").innerHTML=_buildSumHtml(focusFilm);
+  mo.classList.add("on");
+}
+
+/* 팝업이 열려있으면 내용만 갱신 */
+function _refreshSumPopup(){
+  if(!document.getElementById("sumMo")?.classList.contains("on"))return;
+  document.getElementById("sumC").innerHTML=_buildSumHtml(curFilm);
+}
+
+/* 수동 갱신 버튼 */
+function manualRefreshSum(){
+  openSumPopup(curFilm);
+}
+
+/* 통계창 내용만 갱신 (팝업을 새로 열지 않음) */
+function _refreshStats(){
+  if(!results.length){
+    document.getElementById("statsC").innerHTML="<p style='color:#868E96;font-size:12px;padding:8px 0'>배치된 조각이 없습니다.</p>";
+    return;
+  }
+  let html="",tL=0,tU=0,tP=0;
+  results.forEach((r,i)=>{
+    const u=r.placed.length?Math.max(...r.placed.map(p=>p.x+p.length)):0;
+    const rm=Math.max(0,r.panel.length-u),ratio=r.panel.length?u/r.panel.length:0;
+    tL+=r.panel.length;tU+=u;tP+=r.placed.length;
+    html+=`<div style="background:var(--cv);border:1px solid var(--ln);border-radius:6px;padding:11px;margin-bottom:8px">
+      <div style="font-size:12px;font-weight:700;color:var(--hd);margin-bottom:8px">${i+1}. ${esc(r.panel.name||"Film")}</div>
+      <div class="sg">
+        <div class="sc"><div class="sl">총 길이</div><div class="sv a">${fd(r.panel.length/1000)}m</div></div>
+        <div class="sc"><div class="sl">사용 길이</div><div class="sv">${fd(u/1000)}m</div></div>
+        <div class="sc"><div class="sl">잔여 길이</div><div class="sv d">${fd(rm/1000)}m</div></div>
+        <div class="sc"><div class="sl">배치 조각</div><div class="sv">${r.placed.length}개</div></div>
+      </div>
+      <div style="font-size:11px;color:var(--hd);display:flex;justify-content:space-between;margin-bottom:4px"><span>사용률</span><span>${(ratio*100).toFixed(1)}%</span></div>
+      <div style="background:var(--ln);border-radius:4px;height:5px;overflow:hidden"><div style="height:100%;background:linear-gradient(90deg,#343A40,#339AF0);width:${(ratio*100).toFixed(1)}%"></div></div>
+    </div>`;
+  });
+  const tr=tL?tU/tL:0;
+  html=`<div class="sg" style="margin-bottom:12px">
+    <div class="sc"><div class="sl">전체 길이</div><div class="sv a">${fd(tL/1000)}m</div></div>
+    <div class="sc"><div class="sl">전체 잔여</div><div class="sv d">${fd(Math.max(0,tL-tU)/1000)}m</div></div>
+    <div class="sc"><div class="sl">총 조각수</div><div class="sv">${tP}개</div></div>
+    <div class="sc"><div class="sl">평균 사용률</div><div class="sv">${(tr*100).toFixed(1)}%</div></div>
+  </div>`+html;
+  document.getElementById("statsC").innerHTML=html;
+}
+function schedCalc(){
+  // 변경 직전 상태를 Undo 스택에 저장 (200ms 디바운스 후 계산)
+  clearTimeout(calcT);
+  // 현재 상태를 먼저 저장 (입력이 실제로 변경됐을 때만 push)
+  pushUndo();
+  calcT=setTimeout(()=>{calcLayout();},200);
+  schedAutoSave();
+}
 
 /* === 캔버스 (PC앱 스타일 동일) === */
 const cv=document.getElementById("cv"),ctx=cv.getContext("2d");
+
+/* ================================================================
+   드래그 / 스냅 / 회전 시스템 (미리보기창 + Full창 공통)
+   ================================================================ */
+
+/* ── 공통 헬퍼: 스케일 정보 ── */
+function _cvScale(){
+  if(!results.length||curFilm>=results.length)return null;
+  const res=results[curFilm],panel=res.panel;
+  const pad=40,cw=cv.width,ch=cv.height;
+  const scale=Math.min((cw-pad*2)/panel.length,(ch-pad*2-30)/panel.width)*cvS;
+  const ox=(cw-panel.length*scale)/2+cvX,oy=(ch-panel.width*scale)/2+cvY+15;
+  return{scale,ox,oy,panel,fi:curFilm};
+}
+function _fScale(){
+  if(!results.length||fF>=results.length)return null;
+  const res=results[fF],panel=res.panel,pad=60;
+  const scale=Math.min((fcv.width-pad*2)/panel.length,(fcv.height-pad*2)/panel.width)*fS;
+  const ox=(fcv.width-panel.length*scale)/2+fX,oy=(fcv.height-panel.width*scale)/2+fY;
+  return{scale,ox,oy,panel,fi:fF};
+}
+
+/* ── freePiece 접근자 ── */
+function _getFP(fi,idx){return(_freePieces[fi]||{})[idx]||null;}
+function _setFP(fi,idx,val){if(!_freePieces[fi])_freePieces[fi]={};_freePieces[fi][idx]=val;}
+function _delFP(fi,idx){if(_freePieces[fi])delete _freePieces[fi][idx];}
+
+/* ── 실제 placed 위치(free override 반영) ── */
+function _getPlacedPos(fi,i){
+  const res=results[fi];if(!res)return null;
+  const p=res.placed[i];if(!p)return null;
+  const fp=_getFP(fi,i);
+  return{
+    x:fp?fp.x:p.x, y:fp?fp.y:p.y,
+    l:fp&&fp.rotated?p.width:p.length,
+    w:fp&&fp.rotated?p.length:p.width,
+    rotated:fp?fp.rotated:false,
+    origL:p.length, origW:p.width
+  };
+}
+
+/* ── 정수 정사각형 여부 (100×100, 200×200 등 — 회전버튼 불필요) ──
+   두 치수가 모두 정수이고 같은 값일 때만 true.
+   비정수(150.5×200.3)나 비정방(100×200)은 false → 회전버튼 표시 대상 */
+/* 정사각형 판별 — 길이=폭이면 회전해도 의미없음 */
+function _isSquare(l,w){
+  return Math.abs(l-w)<0.5;
+}
+
+/* ── 현재 위치에서 회전 가능 여부 자동 감지 ── */
+function _canRotate(fi,idx){
+  if(!results.length||fi>=results.length)return false;
+  const res=results[fi],panel=res.panel;
+  const p=res.placed[idx];if(!p)return false;
+  if(_isSquare(p.length,p.width))return false;
+  const fp=_getFP(fi,idx)||{x:p.x,y:p.y,rotated:false};
+  // 회전 후 치수 (현재 rotated 기준으로 반전)
+  const newL=fp.rotated?p.length:p.width;
+  const newW=fp.rotated?p.width:p.length;
+  // 클램프 후 위치
+  const cx=Math.max(0,Math.min(panel.length-newL,fp.x));
+  const cy=Math.max(0,Math.min(panel.width-newW,fp.y));
+  // 클램프 후에도 원자재 밖이면 불가
+  if(cx+newL>panel.length+0.5||cy+newW>panel.width+0.5)return false;
+  // 클램프된 위치에서 겹침 체크
+  if(_overlapsOther(fi,idx,cx,cy,newL,newW))return false;
+  return true;
+}
+
+/* ── 조각 회전 실행 ── */
+function _doRotate(fi,idx){
+  if(!results.length||fi>=results.length)return;
+  const res=results[fi],panel=res.panel;
+  const p=res.placed[idx];if(!p)return;
+  if(_isSquare(p.length,p.width))return;
+  const fp=_getFP(fi,idx)||{x:p.x,y:p.y,rotated:false,snapped:false};
+  const newRot=!fp.rotated;
+  const newL=newRot?p.width:p.length;
+  const newW=newRot?p.length:p.width;
+  // 먼저 클램프 — 원자재 경계 내로 위치 보정
+  const cx=Math.max(0,Math.min(panel.length-newL,fp.x));
+  const cy=Math.max(0,Math.min(panel.width-newW,fp.y));
+  // 조각이 원자재보다 크면 불가
+  if(newL>panel.length||newW>panel.width)return;
+  // 클램프된 위치에서 겹침 검사
+  if(_overlapsOther(fi,idx,cx,cy,newL,newW))return;
+  // 적용
+  fp.x=cx;fp.y=cy;fp.rotated=newRot;fp.snapped=false;
+  _setFP(fi,idx,fp);
+  pushUndo();
+  drawCV();
+  if(document.getElementById("fullMo")?.classList.contains("on")&&fF===fi)drawFull();
+  if(document.getElementById("lineMo")?.style.display!=="none"&&lmFilmIdx===fi)lmDraw();
+}
+
+/* ── 빈공간 계산 (드래그 대상 제외) ── */
+function _getFreeRectsExcluding(fi,excludeIdx){
+  if(fi>=results.length)return[];
+  const res=results[fi],panel=res.panel;
+  const BW=panel.length,BH=panel.width;
+  let freeRects=[{x:0,y:0,w:BW,h:BH}];
+  res.placed.forEach((p,i)=>{
+    if(i===excludeIdx)return;
+    const pos=_getPlacedPos(fi,i);
+    if(!pos)return;
+    const pr={x:pos.x,y:pos.y,w:pos.l,h:pos.w};
+    const newFree=[];
+    freeRects.forEach(f=>{
+      if(pr.x>=f.x+f.w||pr.x+pr.w<=f.x||pr.y>=f.y+f.h||pr.y+pr.h<=f.y){newFree.push(f);return;}
+      if(pr.x>f.x)       newFree.push({x:f.x,        y:f.y,w:pr.x-f.x,            h:f.h});
+      if(pr.x+pr.w<f.x+f.w)newFree.push({x:pr.x+pr.w,y:f.y,w:f.x+f.w-(pr.x+pr.w),h:f.h});
+      if(pr.y>f.y)       newFree.push({x:f.x,y:f.y,        w:f.w,h:pr.y-f.y});
+      if(pr.y+pr.h<f.y+f.h)newFree.push({x:f.x,y:pr.y+pr.h,w:f.w,h:f.y+f.h-(pr.y+pr.h)});
+    });
+    // prune
+    const keep=[];
+    outer2:for(let i=0;i<newFree.length;i++){
+      const a=newFree[i];if(a.w<1||a.h<1)continue;
+      for(let j=0;j<newFree.length;j++){if(i===j)continue;const b=newFree[j];
+        if(b.x<=a.x&&b.y<=a.y&&b.x+b.w>=a.x+a.w&&b.y+b.h>=a.y+a.h)continue outer2;}
+      keep.push(a);
+    }
+    freeRects=keep;
+  });
+  return freeRects;
+}
+
+/* ── 겹침 검사 ── */
+function _overlapsOther(fi,excludeIdx,nx,ny,nl,nw){
+  if(fi>=results.length)return false;
+  const res=results[fi];
+  const TOL=0.1; // 허용 오차 최소화
+  for(let i=0;i<res.placed.length;i++){
+    if(i===excludeIdx)continue;
+    const pos=_getPlacedPos(fi,i);if(!pos)continue;
+    const ox2=pos.x,oy2=pos.y,ow=pos.l,oh=pos.w;
+    if(nx<ox2+ow-TOL&&nx+nl>ox2+TOL&&ny<oy2+oh-TOL&&ny+nw>oy2+TOL)return true;
+  }
+  return false;
+}
+
+/* ── 스냅 계산 (강력 자석, 겹침 방지) ── */
+const SNAP_PX=40; // 스냅 감지 거리 (픽셀)
+function _calcSnap(fi,excludeIdx,pLen,pWid,rawX,rawY,scale,curRotated=false,origL=null,origW=null){
+  const panel=results[fi].panel;
+  const snapDistMM=SNAP_PX/scale;
+  const frees=_getFreeRectsExcluding(fi,excludeIdx);
+  // origL/origW: 회전 전 원본 치수 (rotated 판정용)
+  const baseL=origL!==null?origL:pLen;
+  const baseW=origW!==null?origW:pWid;
+  let bestDist=Infinity,bestX=null,bestY=null,bestL=pLen,bestW=pWid,snapped=false;
+  // 현재 회전 상태에서의 rotated 플래그 계산 기준:
+  // curRotated=false이면 pLen=origL → rotated=(bestL!==origL)
+  // curRotated=true 이면 pLen=origW → rotated=true(스냅 방향 무관하게 현재 상태 유지)
+
+  frees.forEach(f=>{
+    // 현재 방향으로 스냅 시도
+    if(pLen<=f.w+0.5&&pWid<=f.h+0.5){
+      const dist=Math.hypot(rawX-f.x,rawY-f.y);
+      if(dist<snapDistMM&&dist<bestDist&&!_overlapsOther(fi,excludeIdx,f.x,f.y,pLen,pWid)){
+        bestDist=dist;bestX=f.x;bestY=f.y;bestL=pLen;bestW=pWid;snapped=true;
+      }
+    }
+    // 90° 회전 방향 스냅 시도 (정사각형 제외, 원본 치수 기준)
+    if(!_isSquare(baseL,baseW)&&pWid<=f.w+0.5&&pLen<=f.h+0.5){
+      const dist=Math.hypot(rawX-f.x,rawY-f.y);
+      if(dist<snapDistMM&&dist<bestDist&&!_overlapsOther(fi,excludeIdx,f.x,f.y,pWid,pLen)){
+        bestDist=dist;bestX=f.x;bestY=f.y;bestL=pWid;bestW=pLen;snapped=true;
+      }
+    }
+  });
+
+  if(!snapped){
+    let cx=Math.max(0,Math.min(panel.length-pLen,rawX));
+    let cy=Math.max(0,Math.min(panel.width-pWid,rawY));
+    if(_overlapsOther(fi,excludeIdx,cx,cy,pLen,pWid)){
+      const fp=_getFP(fi,excludeIdx);
+      const prevX=fp?fp.x:results[fi].placed[excludeIdx].x;
+      const prevY=fp?fp.y:results[fi].placed[excludeIdx].y;
+      const overlapX=_overlapsOther(fi,excludeIdx,cx,prevY,pLen,pWid);
+      const overlapY=_overlapsOther(fi,excludeIdx,prevX,cy,pLen,pWid);
+      if(!overlapX){cy=prevY;}
+      else if(!overlapY){cx=prevX;}
+      else{cx=prevX;cy=prevY;}
+    }
+    // 스냅 없음 → 현재 회전 상태 그대로 유지
+    return{x:cx,y:cy,l:pLen,w:pWid,snapped:false,rotated:curRotated};
+  }
+  // 스냅됨 → bestL이 원본 origL과 같으면 curRotated 아님, 다르면 회전됨
+  const snapRotated=(Math.abs(bestL-baseL)>0.5);
+  return{x:bestX,y:bestY,l:bestL,w:bestW,snapped:true,rotated:snapRotated};
+}
+
+/* ── 히트 테스트 ── */
+function _hitTest(fi,sc,mx,my){
+  if(!results.length||fi>=results.length)return null;
+  const hidSet=hiddenPieces[fi]||new Set();
+  const placed=results[fi].placed;
+  for(let i=placed.length-1;i>=0;i--){
+    if(hidSet.has(i))continue;
+    const pos=_getPlacedPos(fi,i);if(!pos)continue;
+    const x1=sc.ox+pos.x*sc.scale,y1=sc.oy+pos.y*sc.scale;
+    const bw=pos.l*sc.scale,bh=pos.w*sc.scale;
+    if(mx>=x1&&mx<=x1+bw&&my>=y1&&my<=y1+bh)
+      return{i,origX:pos.x,origY:pos.y,pieceL:pos.origL,pieceW:pos.origW,
+             curL:pos.l,curW:pos.w,rotated:pos.rotated};
+  }
+  return null;
+}
+
+/* ── 드래그 공통 이동 로직 ── */
+function _doDragMove(fi,idx,sc,startMx,startMy,curMx,curMy,origX,origY,pieceL,pieceW){
+  _activeDragIdx=idx;
+  _hideRotBtn("cvRotBtn");_hideRotBtn("fRotBtn");
+  const dmx=(curMx-startMx)/sc.scale;
+  const dmy=(curMy-startMy)/sc.scale;
+  const rawX=origX+dmx,rawY=origY+dmy;
+  // 현재 freePiece의 rotated 상태 반영 — 이미 회전된 조각은 회전된 치수로 스냅
+  const fp=_getFP(fi,idx)||{rotated:false};
+  const curRotated=fp.rotated;
+  const curL=curRotated?pieceW:pieceL; // 현재 실제 가로 치수
+  const curW=curRotated?pieceL:pieceW; // 현재 실제 세로 치수
+  const snap=_calcSnap(fi,idx,curL,curW,rawX,rawY,sc.scale,curRotated,pieceL,pieceW);
+  const newRotated=snap.rotated; // _calcSnap이 결정한 최종 rotated
+  _setFP(fi,idx,{x:snap.x,y:snap.y,rotated:newRotated,snapped:snap.snapped});
+  return snap;
+}
+function _doDragEnd(fi,idx,origX,origY){
+  _activeDragIdx=-1; // 드래그 종료
+  const fp=_getFP(fi,idx);if(!fp)return;
+  const moved=Math.abs(fp.x-origX)>0.5||Math.abs(fp.y-origY)>0.5||fp.rotated;
+  if(!moved){
+    _delFP(fi,idx);
+    _rotBtnState=null;_fRotBtnState=null;
+    _hideRotBtn("cvRotBtn");_hideRotBtn("fRotBtn");
+    drawCV();
+    if(document.getElementById("fullMo")?.classList.contains("on")&&fF===fi)drawFull();
+    return;
+  }
+  // 스냅된 경우 버튼 숨김 / 비정사각형 + 회전 가능하면 버튼 표시
+  const wasSnapped=fp.snapped||false;
+  if(!wasSnapped&&!_isSquare(results[fi].placed[idx].length,results[fi].placed[idx].width)&&_canRotate(fi,idx)){
+    _rotBtnState={fi,idx};
+    _fRotBtnState={fi,idx};
+  } else {
+    _rotBtnState=null;_fRotBtnState=null;
+    _hideRotBtn("cvRotBtn");_hideRotBtn("fRotBtn");
+  }
+  pushUndo();
+  drawCV();
+  if(document.getElementById("fullMo")?.classList.contains("on")&&fF===fi)drawFull();
+  if(document.getElementById("lineMo")?.style.display!=="none"&&lmFilmIdx===fi)lmDraw();
+  // 버튼 위치 갱신
+  _updRotBtn();
+}
+
+function _cvRotateFreePiece(){
+  if(!_rotBtnState)return;
+  _doRotate(_rotBtnState.fi,_rotBtnState.idx);
+  _updRotBtn();
+}
+function _fRotateFreePiece(){
+  if(!_fRotBtnState)return;
+  _doRotate(_fRotBtnState.fi,_fRotBtnState.idx);
+  _updRotBtn();
+}
+
 function initCanvas(){
   resizeCV();window.addEventListener("resize",()=>{resizeCV();drawCV();});
-  let drag=null,pinch=null;
-  cv.addEventListener("mousedown",e=>{drag={x:e.clientX,y:e.clientY};});
+  let canvasDrag=null,pinch=null;
+  let pDrag=null; // {hit, startMx, startMy, moved}
+  const THRESH=5;
+  function _getMxy(e){const r=cv.getBoundingClientRect();return{mx:e.clientX-r.left,my:e.clientY-r.top};}
+
+  cv.addEventListener("mousedown",e=>{
+    if(e.button!==0)return;
+    const {mx,my}=_getMxy(e);
+    const sc=_cvScale();
+    const hit=sc?_hitTest(curFilm,sc,mx,my):null;
+    if(hit){pDrag={hit,startMx:mx,startMy:my,moved:false};e.preventDefault();}
+    else canvasDrag={x:e.clientX,y:e.clientY};
+  });
   cv.addEventListener("mousemove",e=>{
-    if(!drag)return;cvX+=e.clientX-drag.x;cvY+=e.clientY-drag.y;drag={x:e.clientX,y:e.clientY};drawCV();
-    // cursor 힌트: 요약 박스 위
-    if(_sumBox){const r=cv.getBoundingClientRect();const mx=e.clientX-r.left,my=e.clientY-r.top;cv.style.cursor=(mx>=_sumBox.bx&&mx<=_sumBox.bx+_sumBox.bw2&&my>=_sumBox.by&&my<=_sumBox.by+_sumBox.bh2)?"pointer":"grabbing";}
+    const {mx,my}=_getMxy(e);
+    if(pDrag){
+      const dx=mx-pDrag.startMx,dy=my-pDrag.startMy;
+      if(!pDrag.moved&&Math.hypot(dx,dy)<THRESH)return;
+      pDrag.moved=true;cv.classList.add("dragging");
+      const sc=_cvScale();if(!sc)return;
+      const h=pDrag.hit;
+      _doDragMove(curFilm,h.i,sc,pDrag.startMx,pDrag.startMy,mx,my,h.origX,h.origY,h.pieceL,h.pieceW);
+      drawCV();
+      if(document.getElementById("fullMo")?.classList.contains("on")&&fF===curFilm)drawFull();
+      if(document.getElementById("lineMo")?.style.display!=="none"&&lmFilmIdx===curFilm)lmDraw();
+      return;
+    }
+    if(canvasDrag){cvX+=e.clientX-canvasDrag.x;cvY+=e.clientY-canvasDrag.y;canvasDrag={x:e.clientX,y:e.clientY};drawCV();return;}
+    if(!canvasDrag&&!pDrag){cv.style.cursor="grab";}
   });
-  cv.addEventListener("click",e=>{
-    if(!_sumBox||!results.length)return;
-    const r=cv.getBoundingClientRect();const mx=e.clientX-r.left,my=e.clientY-r.top;
-    if(mx>=_sumBox.bx&&mx<=_sumBox.bx+_sumBox.bw2&&my>=_sumBox.by&&my<=_sumBox.by+_sumBox.bh2)openSumPopup();
+  cv.addEventListener("mouseup",e=>{
+    cv.classList.remove("dragging");
+    if(pDrag){
+      if(pDrag.moved){_doDragEnd(curFilm,pDrag.hit.i,pDrag.hit.origX,pDrag.hit.origY);}
+      pDrag=null;return;
+    }
+    canvasDrag=null;
   });
-  cv.addEventListener("mousemove",e=>{
-    if(_sumBox&&!drag){const r=cv.getBoundingClientRect();const mx=e.clientX-r.left,my=e.clientY-r.top;cv.style.cursor=(mx>=_sumBox.bx&&mx<=_sumBox.bx+_sumBox.bw2&&my>=_sumBox.by&&my<=_sumBox.by+_sumBox.bh2)?"pointer":"grab";}
-  });
-  cv.addEventListener("mouseup",()=>drag=null);
   cv.addEventListener("wheel",e=>{e.preventDefault();cvS*=e.deltaY<0?1.1:.9;drawCV();},{passive:false});
-  cv.addEventListener("touchstart",e=>{if(e.touches.length===1)drag={x:e.touches[0].clientX,y:e.touches[0].clientY};else if(e.touches.length===2)pinch=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);},{passive:true});
-  cv.addEventListener("touchmove",e=>{if(e.touches.length===1&&drag){cvX+=e.touches[0].clientX-drag.x;cvY+=e.touches[0].clientY-drag.y;drag={x:e.touches[0].clientX,y:e.touches[0].clientY};drawCV();}else if(e.touches.length===2&&pinch){const d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);cvS*=d/pinch;pinch=d;drawCV();}e.preventDefault();},{passive:false});
-  cv.addEventListener("touchend",()=>{drag=null;pinch=null;},{passive:true});
+  cv.addEventListener("dblclick",e=>{if(!results.length)return;const {mx,my}=_getMxy(e);_cvDeletePlaced(mx,my);});
+  let tDrag=null,tLastTap=0;
+  cv.addEventListener("touchstart",e=>{
+    if(e.touches.length===1){
+      const r=cv.getBoundingClientRect();
+      const mx=e.touches[0].clientX-r.left,my=e.touches[0].clientY-r.top;
+      const sc=_cvScale();const hit=sc?_hitTest(curFilm,sc,mx,my):null;
+      if(hit)tDrag={hit,startMx:mx,startMy:my,moved:false,type:"piece"};
+      else tDrag={startX:e.touches[0].clientX,startY:e.touches[0].clientY,type:"pan"};
+    } else if(e.touches.length===2){tDrag=null;pinch=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);}
+  },{passive:true});
+  cv.addEventListener("touchmove",e=>{
+    e.preventDefault();
+    if(e.touches.length===1&&tDrag){
+      const r=cv.getBoundingClientRect();
+      const mx=e.touches[0].clientX-r.left,my=e.touches[0].clientY-r.top;
+      if(tDrag.type==="piece"){
+        const dx=mx-tDrag.startMx,dy=my-tDrag.startMy;
+        if(!tDrag.moved&&Math.hypot(dx,dy)<THRESH)return;
+        tDrag.moved=true;const sc=_cvScale();if(!sc)return;
+        const h=tDrag.hit;
+        _doDragMove(curFilm,h.i,sc,tDrag.startMx,tDrag.startMy,mx,my,h.origX,h.origY,h.pieceL,h.pieceW);
+        drawCV();if(document.getElementById("fullMo")?.classList.contains("on")&&fF===curFilm)drawFull();
+      } else {cvX+=e.touches[0].clientX-tDrag.startX;cvY+=e.touches[0].clientY-tDrag.startY;tDrag.startX=e.touches[0].clientX;tDrag.startY=e.touches[0].clientY;drawCV();}
+    } else if(e.touches.length===2&&pinch){const d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);cvS*=d/pinch;pinch=d;drawCV();}
+  },{passive:false});
+  cv.addEventListener("touchend",e=>{
+    const now=Date.now();
+    if(tDrag&&tDrag.type==="piece"&&tDrag.moved){_doDragEnd(curFilm,tDrag.hit.i,tDrag.hit.origX,tDrag.hit.origY);}
+    else if(tDrag&&!tDrag.moved&&now-tLastTap<300&&e.changedTouches.length===1){
+      // 더블탭 → 삭제
+      const r=cv.getBoundingClientRect();_cvDeletePlaced(e.changedTouches[0].clientX-r.left,e.changedTouches[0].clientY-r.top);
+    }
+    tLastTap=now;tDrag=null;if(e.touches.length===0)pinch=null;
+  },{passive:true});
 }
 function resizeCV(){const w=document.getElementById("CW");const cw=w.clientWidth,ch=w.clientHeight;if(cw>0)cv.width=cw;if(ch>0)cv.height=ch;}
+function _cvDeletePlaced(mx,my){
+  if(!results.length)return;
+  if(curFilm>=results.length)return;
+  const res=results[curFilm],panel=res.panel;
+  const pad=40,cw=cv.width,ch=cv.height;
+  const scale=Math.min((cw-pad*2)/panel.length,(ch-pad*2-30)/panel.width)*cvS;
+  const ox=(cw-panel.length*scale)/2+cvX,oy=(ch-panel.width*scale)/2+cvY+15;
+  const placed=res.placed;
+  const pi=curFilm; // parts 배열의 film 인덱스
+  for(let i=placed.length-1;i>=0;i--){
+    const p=placed[i];
+    const x1=ox+p.x*scale,y1=oy+p.y*scale,bw=p.length*scale,bh=p.width*scale;
+    if(mx>=x1&&mx<=x1+bw&&my>=y1&&my<=y1+bh){
+      const ji=p._ji;
+      if(ji===undefined||ji===null||!parts[pi]||!parts[pi][ji])return;
+      pushUndo(); // 삭제 전 상태 저장
+      const cur=parseInt(parts[pi][ji].quantity)||1;
+      if(cur>1){
+        // 수량 감소
+        parts[pi][ji].quantity=cur-1;
+        // DOM 수량 입력란도 갱신
+        const tbl=document.getElementById(`ct_${pi}`);
+        if(tbl){
+          const rows=tbl.querySelectorAll(".crow");
+          if(rows[ji]){
+            const qInp=rows[ji].querySelector('input[data-col="quantity"]');
+            if(qInp)qInp.value=cur-1;
+          }
+        }
+        toast(`✂ ${p.name||"조각"} 수량 ${cur}→${cur-1}`);
+      } else {
+        // 수량 1 → 행 삭제 (최소 1개 유지 규칙 예외: 다른 행이 있으면 삭제)
+        if(parts[pi].length>1){
+          parts[pi].splice(ji,1);
+          _ensureBlankRow(pi); // 빈 행 유지
+          rebuildSec(pi);
+          toast(`🗑 ${p.name||"조각"} 삭제`);
+        } else {
+          // 마지막 행이면 치수만 초기화
+          parts[pi][ji].length="";parts[pi][ji].width="";parts[pi][ji].quantity=1;
+          rebuildSec(pi);
+          toast(`✂ ${p.name||"조각"} 초기화`);
+        }
+      }
+      schedCalc();
+    
+      return;
+    }
+  }
+}
 function drawCV(){
   ctx.clearRect(0,0,cv.width,cv.height);ctx.fillStyle="#F1F3F5";ctx.fillRect(0,0,cv.width,cv.height);
+  const cw=cv.width,ch=cv.height;
   if(!results.length){
     ctx.fillStyle="#ADB5BD";ctx.font="13px 맑은 고딕";ctx.textAlign="center";
-    ctx.fillText("데이터 없음 — 입력 후 자동 계산됩니다",cv.width/2,cv.height/2);return;
+    ctx.fillText("데이터 없음 — 입력 후 자동 계산됩니다",cw/2,ch/2);
+    _updRotBtn();return;
   }
   // curFilm 범위 보정
   if(curFilm>=results.length)curFilm=results.length-1;
@@ -1678,7 +2910,7 @@ function drawCV(){
     ctx.fillStyle="#ADB5BD";ctx.font="13px 맑은 고딕";ctx.textAlign="center";
     ctx.fillText("Film 치수를 입력하세요",cv.width/2,cv.height/2);return;
   }
-  const pad=40,cw=cv.width,ch=cv.height;
+  const pad=40; // cw,ch는 함수 상단에서 이미 선언
   const scale=Math.min((cw-pad*2)/panel.length,(ch-pad*2-30)/panel.width)*cvS;
   const ox=(cw-panel.length*scale)/2+cvX,oy=(ch-panel.width*scale)/2+cvY+15;
   ctx.fillStyle="#FFF";ctx.strokeStyle="#495057";ctx.lineWidth=1.5;
@@ -1695,9 +2927,25 @@ function drawCV(){
   ctx.restore();
 
   // ── 잔여 영역 (빨간 점선 + 치수 표시) ── PC앱 draw_remaining_areas 동일
+  // 숨겨진 조각과 겹치는 잔여라인은 표시하지 않음
+  const hidSet=hiddenPieces[curFilm]||new Set();
+  const visiblePlaced=res.placed.filter((_,i)=>!hidSet.has(i));
   ctx.strokeStyle="#E03131";ctx.lineWidth=1;ctx.setLineDash([4,2]);
   res.remaining.forEach(([ax,ay,aw,ah])=>{
     if(aw<2||ah<2)return;
+    // 이 잔여 영역이 숨겨진 조각과 완전히 겹치는지 확인
+    const fullyHidden=res.placed.some((p,i)=>{
+      if(!hidSet.has(i))return false;
+      // 잔여 영역이 조각 경계와 완전히 일치하는지 (공유 라인 체크)
+      return(Math.abs(ax-(p.x+p.length))<1||Math.abs(ax+aw-p.x)<1||Math.abs(ay-(p.y+p.width))<1||Math.abs(ay+ah-p.y)<1)
+        &&(ax>=p.x-1&&ax+aw<=p.x+p.length+1&&ay>=p.y-1&&ay+ah<=p.y+p.width+1);
+    });
+    // 숨겨진 조각의 경계 내에 완전히 포함된 잔여영역 제거
+    const coveredByHidden=res.placed.some((p,i)=>{
+      if(!hidSet.has(i))return false;
+      return ax>=p.x-1&&ax+aw<=p.x+p.length+1&&ay>=p.y-1&&ay+ah<=p.y+p.width+1;
+    });
+    if(coveredByHidden)return;
     const rx=ox+ax*scale,ry=oy+ay*scale,rw=aw*scale,rh=ah*scale;
     ctx.strokeRect(rx,ry,rw,rh);
     // 잔여 치수 텍스트 (PC앱 동일: 길이 상단, 폭 좌측)
@@ -1714,6 +2962,7 @@ function drawCV(){
 
   // ── 조각: 이름+치수 겹침 자동 회피 ──
   const cvUsed=[];
+  const isDraggingIdx=_activeDragIdx; // 전역 드래그 상태 사용
   function _cvRov(ax,ay,aw,ah,bx,by,bw2,bh2){return Math.abs(ax-bx)<(aw+bw2)*0.5&&Math.abs(ay-by)<(ah+bh2)*0.5;}
   function cvFindPos(x1,y1,x2,y2,isLen,fsd,sc2){
     const txt=String(Math.round(isLen?(x2-x1)/sc2:(y2-y1)/sc2));
@@ -1736,21 +2985,35 @@ function drawCV(){
     const[cx,cy]=best||[(x1+x2)/2,(y1+y2)/2];
     return[Math.max(minX,Math.min(maxX,cx)),Math.max(minY,Math.min(maxY,cy)),hw,hh];
   }
-  res.placed.forEach(p=>{
-    const x1=ox+p.x*scale,y1=oy+p.y*scale,bw=p.length*scale,bh=p.width*scale;
-    ctx.fillStyle=p.color;ctx.strokeStyle="#444";ctx.lineWidth=.8;
+  res.placed.forEach((p,_pi)=>{
+    if(hidSet.has(_pi))return; // 숨겨진 조각 스킵
+    // free 조각이면 override 위치/회전 사용
+    const fp=(_freePieces[curFilm]||{})[_pi];
+    const px=fp?fp.x:p.x,py=fp?fp.y:p.y;
+    const pLen=fp&&fp.rotated?p.width:p.length;
+    const pWid=fp&&fp.rotated?p.length:p.width;
+    const x1=ox+px*scale,y1=oy+py*scale,bw=pLen*scale,bh=pWid*scale;
+    const isCurDrag=(isDraggingIdx===_pi);
+    // 드래그 중인 조각: 반투명 + 강조 테두리
+    if(isCurDrag){
+      ctx.globalAlpha=0.72;
+      ctx.fillStyle=p.color;ctx.strokeStyle="#F59F00";ctx.lineWidth=2.5;
+    } else {
+      ctx.globalAlpha=1;
+      ctx.fillStyle=p.color;ctx.strokeStyle="#444";ctx.lineWidth=.8;
+    }
     ctx.fillRect(x1,y1,bw,bh);ctx.strokeRect(x1,y1,bw,bh);
+    ctx.globalAlpha=1;
     if(bw>22&&bh>15){
       const tc=cc(p.color);
       const fs=Math.max(7,Math.min(15,Math.floor(Math.min(bw/5,bh/2.5))));
       const fsS=Math.max(6,fs-2);
-      // 이름 — 여백 따라 한줄/두줄 자동 선택
-      {
+      // 드래그 중: 이름 숨기고 치수만 표시
+      if(!isCurDrag){
         const cvFS=Math.max(7,Math.min(fs,Math.floor(Math.min(bw/5,bh/2.5))));
         const {twoLine,line1,line2}=partLabelLines(panel.name,p.name,bw,bh,cvFS);
         const cx_=(x1+x1+bw)/2;
         if(twoLine&&line1&&line2&&bh>cvFS*2.8){
-          // 두 줄: 원자재이름 위, (조각이름) 아래
           const fs1=Math.max(7,Math.min(cvFS,Math.floor(bw/(line1.length*0.65+1))));
           const fs2=Math.max(6,Math.min(cvFS-1,Math.floor(bw/(line2.length*0.65+1))));
           const cy_=(y1+y1+bh)/2;
@@ -1761,7 +3024,7 @@ function drawCV(){
           ctx.font="bold "+fs2+"px 맑은 고딕";ctx.fillText(line2,cx_,ny2);
           cvUsed.push([cx_,(ny1+ny2)/2,Math.max(fs1*line1.length*0.55,fs2*line2.length*0.55)+2,(ny2-ny1+fs2)]);
         } else if(line1){
-          const single=line1; // twoLine=false이면 line1=single
+          const single=line1;
           const dispFS=Math.max(7,Math.min(cvFS,Math.floor(Math.min(bw/(single.length*0.6+1),bh/2.5))));
           const nw=dispFS*single.length*0.55+2,nh=dispFS;
           const nx=Math.max(x1+nw/2+1,Math.min(x1+bw-nw/2-1,cx_));
@@ -1771,31 +3034,24 @@ function drawCV(){
           cvUsed.push([nx,ny-nh*0.5,nw,nh]);
         }
       }
-      // 길이 치수 — 내부, 겹침 회피
+      // 치수 (항상 표시)
       if(bw>28&&bh>20){
         const[cx,cy,hw,hh]=cvFindPos(x1,y1,x1+bw,y1+bh,true,fsS,scale);
         ctx.fillStyle=tc;ctx.font=fsS+"px 'Courier New'";ctx.textAlign="center";
-        ctx.fillText(Math.round(p.length),cx,cy+fsS*0.35);
+        ctx.fillText(Math.round(pLen),cx,cy+fsS*0.35);
         cvUsed.push([cx,cy,hw,hh]);
       }
-      // 폭 치수 — 내부, 겹침 회피
       if(bh>20&&bw>35){
         const[cx,cy,hw,hh]=cvFindPos(x1,y1,x1+bw,y1+bh,false,fsS,scale);
         ctx.fillStyle=tc;ctx.font=fsS+"px 'Courier New'";ctx.textAlign="center";
-        ctx.fillText(Math.round(p.width),cx,cy+fsS*0.35);
+        ctx.fillText(Math.round(pWid),cx,cy+fsS*0.35);
         cvUsed.push([cx,cy,hw,hh]);
       }
     }
   });
-  const usedLen=res.placed.length?Math.max(...res.placed.map(p=>p.x+p.length)):0,remLen=Math.max(0,panel.length-usedLen);
-  const bx=cw-148,by=ch-92,bw2=138,bh2=82;
-  _sumBox={bx,by,bw2,bh2};
-  ctx.fillStyle="rgba(30,33,48,.9)";ctx.strokeStyle="#2E3448";ctx.lineWidth=1;ctx.fillRect(bx,by,bw2,bh2);ctx.strokeRect(bx,by,bw2,bh2);
-  ctx.fillStyle="#9BA3B2";ctx.font="9px 'Courier New'";ctx.textAlign="left";
-  [`총길이: ${fd(panel.length/1000)}m`,`총폭: ${fd(panel.width/1000)}m`,`사용: ${fd(usedLen/1000)}m`,`잔여: ${fd(remLen/1000)}m`,`조각: ${res.placed.length}개`].forEach((l,i)=>ctx.fillText(l,bx+7,by+13+i*14));
-  // 클릭 힌트
-  ctx.fillStyle="rgba(255,255,255,0.28)";ctx.font="8px 'Courier New'";ctx.textAlign="center";
-  ctx.fillText("▶ 클릭하면 상세 보기",bx+bw2/2,by+bh2-4);
+  // 드래그 중에는 회전버튼 숨김 유지
+  if(_activeDragIdx>=0){_hideRotBtn("cvRotBtn");_hideRotBtn("fRotBtn");}
+  else _updRotBtn();
 }
 function renderFTabs(){
   const w=document.getElementById("filmTabs");w.innerHTML="";
@@ -1804,7 +3060,39 @@ function renderFTabs(){
     b.addEventListener("click",()=>{curFilm=i;cvS=1;cvX=0;cvY=0;renderFTabs();_updFlipBtns();drawCV();});w.appendChild(b);
   });
 }
-function zoom(f){cvS*=f;drawCV();}function resetZoom(){cvS=1;cvX=0;cvY=0;drawCV();}
+function zoom(f){
+  cvS*=f;
+  _autoResizeLP();
+  drawCV();
+}
+function resetZoom(){
+  cvS=1;cvX=0;cvY=0;
+  _autoResizeLP();
+  drawCV();
+}
+/* 미리보기 캔버스의 이미지 크기에 비례해 왼쪽 패널(LP) 너비 자동 조정 */
+function _autoResizeLP(){
+  if(!results.length)return;
+  const res=results[curFilm];
+  if(!res||!res.panel||!res.panel.length||!res.panel.width)return;
+  const lp=document.getElementById('LP');
+  const cw=document.getElementById('CW');
+  if(!lp||!cw)return;
+  // 현재 캔버스 영역 크기
+  const canvasW=cw.clientWidth||600;
+  const canvasH=cw.clientHeight||400;
+  const pad=40;
+  // cvS=1일 때 이미지가 차지하는 폭 (px)
+  const baseScale=Math.min((canvasW-pad*2)/res.panel.length,(canvasH-pad*2-30)/res.panel.width);
+  const imgW=res.panel.length*baseScale*cvS;
+  // 이미지 폭이 캔버스 폭의 일정 비율 넘으면 LP 축소, 아니면 확대
+  const totalW=lp.offsetWidth+canvasW;
+  // 이미지가 캔버스를 꽉 채울수록 LP는 최소(280px)로, 작을수록 기본(540px)으로
+  const ratio=Math.min(imgW/(canvasW-pad*2),2.0);  // 0~2
+  const minLP=280,maxLP=540;
+  const target=Math.round(maxLP-(maxLP-minLP)*Math.min(ratio,1.0));
+  lp.style.width=target+'px';
+}
 
 function doTurn(){
   if(curFilm<0||curFilm>=panels.length)return;
@@ -1839,33 +3127,17 @@ function updIB(){
     b.innerHTML=`<span class="ibn">${i+1}. ${esc(r.panel.name||"Film")}</span><span class="ibv">잔여: ${fd(rm/1000)}m</span><span class="ibv">조각: ${r.placed.length}개</span>`;
     bar.appendChild(b);
   });
+  // 요약정보 버튼 — innerHTML 초기화 후 다시 추가
+  const sumBtn=document.createElement("button");
+  sumBtn.id="btnSumOpen";
+  sumBtn.title="요약정보";
+  sumBtn.onclick=()=>openSumPopup(curFilm);
+  sumBtn.style.cssText="margin-left:auto;margin-right:8px;height:24px;padding:0 10px;font-size:11px;font-weight:700;border:1px solid var(--ln);border-radius:4px;background:var(--cv);color:var(--tx);cursor:pointer;display:flex;align-items:center;gap:4px;white-space:nowrap;flex-shrink:0;";
+  sumBtn.innerHTML="📋 요약정보";
+  bar.appendChild(sumBtn);
 }
 
 /* === 요약 팝업 === */
-function openSumPopup(focusFilm){
-  if(!results.length)return;
-  const hi=focusFilm!==undefined?focusFilm:curFilm;
-  let html="";
-  results.forEach((r,i)=>{
-    const u=r.placed.length?Math.max(...r.placed.map(p=>p.x+p.length)):0;
-    const rm=Math.max(0,r.panel.length-u),ratio=r.panel.length?(u/r.panel.length*100).toFixed(1):0;
-    html+=`<div style="background:var(--cv);border:1px solid var(--ln);border-radius:6px;padding:10px;margin-bottom:8px${i===hi?";border-color:var(--ac);border-width:2px":""}">
-      <div style="font-size:12px;font-weight:700;color:var(--hd);margin-bottom:6px">${i+1}. ${esc(r.panel.name||"Film")}</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:11px;margin-bottom:6px">
-        <div><span style="color:#868E96">총길이 </span><b>${fd(r.panel.length/1000)}m</b></div>
-        <div><span style="color:#868E96">총폭 </span><b>${fd(r.panel.width/1000)}m</b></div>
-        <div><span style="color:#868E96">사용 </span><b style="color:var(--ac)">${fd(u/1000)}m</b></div>
-        <div><span style="color:#868E96">잔여 </span><b style="color:var(--sc)">${fd(rm/1000)}m</b></div>
-        <div><span style="color:#868E96">조각 </span><b>${r.placed.length}개</b></div>
-        <div><span style="color:#868E96">사용률 </span><b>${ratio}%</b></div>
-      </div>
-      <div style="background:var(--ln);border-radius:3px;height:4px;overflow:hidden"><div style="height:100%;background:linear-gradient(90deg,#343A40,#339AF0);width:${ratio}%"></div></div>
-    </div>`;
-  });
-  document.getElementById("sumC").innerHTML=html;
-  document.getElementById("sumMo").classList.add("on");
-}
-
 /* === Full 보기 === */
 const fcv=document.getElementById("fullCv"),fctx=fcv.getContext("2d");
 function openFull(idx){
@@ -1874,27 +3146,106 @@ function openFull(idx){
   document.getElementById("fullMo").classList.add("on");
   const ft=document.getElementById("fullTabs");ft.innerHTML="";
   results.forEach((r,i)=>{const b=document.createElement("button");b.className="ftab"+(i===fF?" on":"");b.textContent=r.panel.name||"Film"+(i+1);b.addEventListener("click",()=>{fF=i;document.querySelectorAll("#fullTabs .ftab").forEach((t,j)=>t.classList.toggle("on",j===i));_updFullFlipBtns();drawFull();});ft.appendChild(b);});
-  setTimeout(()=>{fcv.width=fcv.offsetWidth;fcv.height=fcv.offsetHeight;_updFullFlipBtns();fresetZoom();},60);
-  let fd2=null,fPinch=null;
-  fcv.onmousedown=e=>{fd2={x:e.clientX,y:e.clientY};};
+  setTimeout(()=>{fcv.width=fcv.offsetWidth;fcv.height=fcv.offsetHeight;_updFullFlipBtns();fresetZoom();
+  },60);
+  // Full 드래그 시스템
+  let fCanvasDrag=null,fPinch=null,fPDrag=null;
+  const THRESH=5;
+  function _getFMxy(e){const r=fcv.getBoundingClientRect();return{mx:e.clientX-r.left,my:e.clientY-r.top};}
+
+  fcv.onmousedown=e=>{
+    if(e.button!==0)return;
+    const {mx,my}=_getFMxy(e);
+    const sc=_fScale();const hit=sc?_hitTest(fF,sc,mx,my):null;
+    if(hit){fPDrag={hit,startMx:mx,startMy:my,moved:false};e.preventDefault();}
+    else fCanvasDrag={x:e.clientX,y:e.clientY};
+  };
   fcv.onmousemove=e=>{
-    if(fd2){fX+=e.clientX-fd2.x;fY+=e.clientY-fd2.y;fd2={x:e.clientX,y:e.clientY};drawFull();fcv.style.cursor="grabbing";return;}
-    // cursor 힌트: 요약 박스 위
-    if(_fSumBox){const r=fcv.getBoundingClientRect();const mx=e.clientX-r.left,my=e.clientY-r.top;fcv.style.cursor=(mx>=_fSumBox.bx&&mx<=_fSumBox.bx+_fSumBox.bw2&&my>=_fSumBox.by&&my<=_fSumBox.by+_fSumBox.bh2)?"pointer":"grab";}
+    const {mx,my}=_getFMxy(e);
+    if(fPDrag){
+      const dx=mx-fPDrag.startMx,dy=my-fPDrag.startMy;
+      if(!fPDrag.moved&&Math.hypot(dx,dy)<THRESH)return;
+      fPDrag.moved=true;fcv.style.cursor="grabbing";
+      const sc=_fScale();if(!sc)return;
+      const h=fPDrag.hit;
+      _doDragMove(fF,h.i,sc,fPDrag.startMx,fPDrag.startMy,mx,my,h.origX,h.origY,h.pieceL,h.pieceW);
+      drawFull();if(fF===curFilm)drawCV();
+      if(document.getElementById("lineMo")?.style.display!=="none"&&lmFilmIdx===fF)lmDraw();
+      return;
+    }
+    if(fCanvasDrag){fX+=e.clientX-fCanvasDrag.x;fY+=e.clientY-fCanvasDrag.y;fCanvasDrag={x:e.clientX,y:e.clientY};drawFull();fcv.style.cursor="grabbing";return;}
+    fcv.style.cursor="grab";
   };
-  fcv.onmouseup=()=>{fd2=null;fcv.style.cursor="grab";};
-  fcv.onclick=e=>{
-    if(!_fSumBox||!results.length)return;
-    const r=fcv.getBoundingClientRect();const mx=e.clientX-r.left,my=e.clientY-r.top;
-    if(mx>=_fSumBox.bx&&mx<=_fSumBox.bx+_fSumBox.bw2&&my>=_fSumBox.by&&my<=_fSumBox.by+_fSumBox.bh2)openSumPopup(fF);
+  fcv.onmouseup=e=>{
+    fcv.style.cursor="grab";
+    if(fPDrag){
+      if(fPDrag.moved){_doDragEnd(fF,fPDrag.hit.i,fPDrag.hit.origX,fPDrag.hit.origY);}
+      fPDrag=null;return;
+    }
+    fCanvasDrag=null;
   };
+  // Full 더블클릭
+  if(!fcv._dblBound){
+    fcv._dblBound=true;
+    fcv.addEventListener("dblclick",e=>{const r=fcv.getBoundingClientRect();_fcvToggleHidden(e.clientX-r.left,e.clientY-r.top);});
+    let _fLastTap=0;
+    fcv.addEventListener("touchend",e=>{
+      const now=Date.now();
+      if(fPinch){}
+      else if(e.touches.length===0){
+        if(_fTDrag&&_fTDrag.moved){_doDragEnd(fF,_fTDrag.hit.i,_fTDrag.hit.origX,_fTDrag.hit.origY);}
+        else if(_fTDrag&&!_fTDrag.moved&&now-_fLastTap<300&&e.changedTouches.length===1){
+          // 더블탭 → 삭제
+          const r=fcv.getBoundingClientRect();_fcvToggleHidden(e.changedTouches[0].clientX-r.left,e.changedTouches[0].clientY-r.top);
+        }
+        _fLastTap=now;_fTDrag=null;fCanvasDrag=null;fPinch=null;
+      }
+    },{passive:true});
+  }
   fcv.onwheel=e=>{e.preventDefault();fS*=e.deltaY<0?1.1:.9;drawFull();};
-  // 터치 드래그 / 핀치줌 (passive:false 필요 → addEventListener)
   if(!fcv._touchBound){
     fcv._touchBound=true;
-    fcv.addEventListener("touchstart",e=>{if(e.touches.length===1){fd2={x:e.touches[0].clientX,y:e.touches[0].clientY};}else if(e.touches.length===2){fPinch=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);}},{passive:true});
-    fcv.addEventListener("touchmove",e=>{e.preventDefault();if(e.touches.length===1&&fd2){fX+=e.touches[0].clientX-fd2.x;fY+=e.touches[0].clientY-fd2.y;fd2={x:e.touches[0].clientX,y:e.touches[0].clientY};drawFull();}else if(e.touches.length===2&&fPinch){const d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);fS*=d/fPinch;fPinch=d;drawFull();}},{passive:false});
-    fcv.addEventListener("touchend",e=>{if(e.touches.length===0){fd2=null;fPinch=null;}},{passive:true});
+    fcv.addEventListener("touchstart",e=>{
+      if(e.touches.length===1){const r=fcv.getBoundingClientRect();const mx=e.touches[0].clientX-r.left,my=e.touches[0].clientY-r.top;const sc=_fScale();const hit=sc?_hitTest(fF,sc,mx,my):null;if(hit)_fTDrag={hit,startMx:mx,startMy:my,moved:false,type:"piece"};else _fTDrag={startX:e.touches[0].clientX,startY:e.touches[0].clientY,type:"pan"};}
+      else if(e.touches.length===2){_fTDrag=null;fPinch=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);}
+    },{passive:true});
+    fcv.addEventListener("touchmove",e=>{
+      e.preventDefault();
+      if(e.touches.length===1&&_fTDrag){const r=fcv.getBoundingClientRect();const mx=e.touches[0].clientX-r.left,my=e.touches[0].clientY-r.top;
+        if(_fTDrag.type==="piece"){const dx=mx-_fTDrag.startMx,dy=my-_fTDrag.startMy;if(!_fTDrag.moved&&Math.hypot(dx,dy)<THRESH)return;_fTDrag.moved=true;const sc=_fScale();if(!sc)return;const h=_fTDrag.hit;_doDragMove(fF,h.i,sc,_fTDrag.startMx,_fTDrag.startMy,mx,my,h.origX,h.origY,h.pieceL,h.pieceW);drawFull();if(fF===curFilm)drawCV();}
+        else{fX+=e.touches[0].clientX-_fTDrag.startX;fY+=e.touches[0].clientY-_fTDrag.startY;_fTDrag.startX=e.touches[0].clientX;_fTDrag.startY=e.touches[0].clientY;drawFull();}}
+      else if(e.touches.length===2&&fPinch){const d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);fS*=d/fPinch;fPinch=d;drawFull();}
+    },{passive:false});
+  }
+}
+let _fTDrag=null; // Full 터치 드래그 상태 (전역)
+function _fcvToggleHidden(mx,my){
+  if(!results.length||fF>=results.length)return;
+  const res=results[fF],panel=res.panel,pad=60;
+  const scale=Math.min((fcv.width-pad*2)/panel.length,(fcv.height-pad*2)/panel.width)*fS;
+  const ox=(fcv.width-panel.length*scale)/2+fX,oy=(fcv.height-panel.width*scale)/2+fY;
+  const placed=res.placed;
+  const pi=fF;
+  for(let i=placed.length-1;i>=0;i--){
+    const p=placed[i];
+    const x1=ox+p.x*scale,y1=oy+p.y*scale,bw=p.length*scale,bh=p.width*scale;
+    if(mx>=x1&&mx<=x1+bw&&my>=y1&&my<=y1+bh){
+      const ji=p._ji;
+      if(ji===undefined||ji===null||!parts[pi]||!parts[pi][ji])return;
+      pushUndo();
+      const cur=parseInt(parts[pi][ji].quantity)||1;
+      if(cur>1){
+        parts[pi][ji].quantity=cur-1;
+        const tbl=document.getElementById(`ct_${pi}`);
+        if(tbl){const rows=tbl.querySelectorAll(".crow");if(rows[ji]){const qInp=rows[ji].querySelector('input[data-col="quantity"]');if(qInp)qInp.value=cur-1;}}
+        toast(`✂ ${p.name||"조각"} 수량 ${cur}→${cur-1}`);
+      } else {
+        if(parts[pi].length>1){parts[pi].splice(ji,1);rebuildSec(pi);toast(`🗑 ${p.name||"조각"} 삭제`);}
+        else{parts[pi][ji].length="";parts[pi][ji].width="";parts[pi][ji].quantity=1;rebuildSec(pi);toast(`✂ ${p.name||"조각"} 초기화`);}
+      }
+      schedCalc();
+      return;
+    }
   }
 }
 function drawFull(){
@@ -1915,11 +3266,18 @@ function drawFull(){
   fctx.textAlign="right";fctx.textBaseline="middle";
   fctx.fillText(fdPanel(panel.width),ox-6,oy+panel.width*scale/2);
   fctx.restore();
+  const fHidSet=hiddenPieces[fF]||new Set();
   // 잔여 영역 + 치수 표시 (PC앱 draw_remaining_areas 동일)
   if(!lineMode){
     fctx.strokeStyle="#E03131";fctx.lineWidth=1;fctx.setLineDash([4,2]);
     res.remaining.forEach(([ax,ay,aw,ah])=>{
       if(aw<2||ah<2)return;
+      // 숨겨진 조각 범위 내 잔여영역 숨김
+      const coveredByHidden=res.placed.some((p,i)=>{
+        if(!fHidSet.has(i))return false;
+        return ax>=p.x-1&&ax+aw<=p.x+p.length+1&&ay>=p.y-1&&ay+ah<=p.y+p.width+1;
+      });
+      if(coveredByHidden)return;
       const rx=ox+ax*scale,ry=oy+ay*scale,rw=aw*scale,rh=ah*scale;
       fctx.strokeRect(rx,ry,rw,rh);
       if(rw>40&&rh>25){
@@ -1932,8 +3290,11 @@ function drawFull(){
     fctx.setLineDash([]);
   }
   // 조각 렌더
-  res.placed.forEach(p=>{
-    const x1=ox+p.x*scale,y1=oy+p.y*scale,bw=p.length*scale,bh=p.width*scale;
+  res.placed.forEach((p,_fpi)=>{
+    if(fHidSet.has(_fpi))return; // 숨겨진 조각 스킵
+    const pos=_getPlacedPos(fF,_fpi);
+    const x1=ox+pos.x*scale,y1=oy+pos.y*scale,bw=pos.l*scale,bh=pos.w*scale;
+    const isFDrag=(_fTDrag&&_fTDrag.type==="piece"&&_fTDrag.hit&&_fTDrag.hit.i===_fpi);
     if(lineMode){
       // Line Mode: 윤곽선만, 배경 흰색 반투명, 치수+이름 텍스트 강조
       fctx.fillStyle="rgba(255,255,255,0.6)";fctx.fillRect(x1,y1,bw,bh);
@@ -1958,13 +3319,13 @@ function drawFull(){
       }
     } else {
       // Normal Mode: 채우기 + 윤곽선 + 텍스트 (겹침 자동회피)
-      fctx.fillStyle=p.color;fctx.strokeStyle="#444";fctx.lineWidth=.8;
-      fctx.fillRect(x1,y1,bw,bh);fctx.strokeRect(x1,y1,bw,bh);
+      if(isFDrag){fctx.globalAlpha=0.72;fctx.fillStyle=p.color;fctx.strokeStyle="#F59F00";fctx.lineWidth=2.5;}
+      else{fctx.globalAlpha=1;fctx.fillStyle=p.color;fctx.strokeStyle="#444";fctx.lineWidth=.8;}
+      fctx.fillRect(x1,y1,bw,bh);fctx.strokeRect(x1,y1,bw,bh);fctx.globalAlpha=1;
       if(bw>22&&bh>15){
         const tc=cc(p.color);
         const fs=Math.max(8,Math.min(16,Math.floor(Math.min(bw/5,bh/2.5))));
         const fsS=Math.max(7,fs-2);
-        const fullLabel=partLabel(panel.name,p.name);
         const fUsed=[];
         function _fRov(ax,ay,aw,ah,bx2,by2,bw3,bh3){return Math.abs(ax-bx2)<(aw+bw3)*0.5&&Math.abs(ay-by2)<(ah+bh3)*0.5;}
         function fFindPos(lx1,ly1,lx2,ly2,isLen,fsd){
@@ -1983,8 +3344,8 @@ function drawFull(){
           const[cx,cy]=best||[(lx1+lx2)/2,(ly1+ly2)/2];
           return[Math.max(minX,Math.min(maxX,cx)),Math.max(minY,Math.min(maxY,cy)),hw,hh];
         }
-        // 이름 — 여백 따라 한줄/두줄
-        {
+        // 이름 — 드래그 중이면 숨김
+        if(!isFDrag){
           const fFS=Math.max(7,Math.min(fs,Math.floor(Math.min(bw/5,bh/2.5))));
           const {twoLine:fTL,line1:fL1,line2:fL2}=partLabelLines(panel.name,p.name,bw,bh,fFS);
           const fcx_=(x1+x1+bw)/2;
@@ -2008,8 +3369,8 @@ function drawFull(){
             fUsed.push([nx,ny-nh*0.5,nw,nh]);
           }
         }
-        if(bh>30){const[cx,cy,hw,hh]=fFindPos(x1,y1,x1+bw,y1+bh,true,fsS);fctx.font=fsS+"px 'Courier New'";fctx.fillStyle=tc;fctx.textAlign="center";fctx.fillText(Math.round(p.length),cx,cy+fsS*0.35);fUsed.push([cx,cy,hw,hh]);}
-        if(bw>50){const[cx,cy,hw,hh]=fFindPos(x1,y1,x1+bw,y1+bh,false,fsS);fctx.font=fsS+"px 'Courier New'";fctx.fillStyle=tc;fctx.textAlign="center";fctx.fillText(Math.round(p.width),cx,cy+fsS*0.35);fUsed.push([cx,cy,hw,hh]);}
+        if(bh>30){const[cx,cy,hw,hh]=fFindPos(x1,y1,x1+bw,y1+bh,true,fsS);fctx.font=fsS+"px 'Courier New'";fctx.fillStyle=tc;fctx.textAlign="center";fctx.fillText(Math.round(pos.l),cx,cy+fsS*0.35);fUsed.push([cx,cy,hw,hh]);}
+        if(bw>50){const[cx,cy,hw,hh]=fFindPos(x1,y1,x1+bw,y1+bh,false,fsS);fctx.font=fsS+"px 'Courier New'";fctx.fillStyle=tc;fctx.textAlign="center";fctx.fillText(Math.round(pos.w),cx,cy+fsS*0.35);fUsed.push([cx,cy,hw,hh]);}
       }
     }
   });
@@ -2058,16 +3419,8 @@ function drawFull(){
     }
     fctx.restore();
   }
-  // 정보박스 (fcv 기준 — Full 모달 캔버스 크기 사용)
-  const usedLen=res.placed.length?Math.max(...res.placed.map(p=>p.x+p.length)):0,remLen=Math.max(0,panel.length-usedLen);
-  const fbx=fcv.width-148,fby=fcv.height-92,fbw2=138,fbh2=82;
-  _fSumBox={bx:fbx,by:fby,bw2:fbw2,bh2:fbh2};
-  fctx.fillStyle="rgba(30,33,48,.9)";fctx.strokeStyle="#2E3448";fctx.lineWidth=1;fctx.fillRect(fbx,fby,fbw2,fbh2);fctx.strokeRect(fbx,fby,fbw2,fbh2);
-  fctx.fillStyle="#9BA3B2";fctx.font="9px 'Courier New'";fctx.textAlign="left";
-  [`총길이: ${fd(panel.length/1000)}m`,`총폭: ${fd(panel.width/1000)}m`,`사용: ${fd(usedLen/1000)}m`,`잔여: ${fd(remLen/1000)}m`,`조각: ${res.placed.length}개`].forEach((l,i)=>fctx.fillText(l,fbx+7,fby+13+i*14));
-  // 클릭 힌트
-  fctx.fillStyle="rgba(255,255,255,0.28)";fctx.font="8px 'Courier New'";fctx.textAlign="center";
-  fctx.fillText("▶ 클릭하면 상세 보기",fbx+fbw2/2,fby+fbh2-4);
+  if(_activeDragIdx>=0){_hideRotBtn("cvRotBtn");_hideRotBtn("fRotBtn");}
+  else if(!_fTDrag)_updRotBtn();
 }
 function fzoom(f){fS*=f;drawFull();}function fresetZoom(){fS=1;fX=0;fY=0;drawFull();}
 
@@ -2121,30 +3474,187 @@ function _updLmFlipBtns(){
 
 // ── Line Mode 제어판 가로/세로 토글 ─────────────────────────
 // PC앱과 동일: 섹션들을 2열 grid로 재배치
-let lmLayoutH=false;
-function lmToggleLayout(e){
-  if(e)e.stopPropagation();
-  lmLayoutH=!lmLayoutH;
-  const ctrl=document.getElementById("lmCtrl");
-  const body=document.getElementById("lmCtrlBody");
-  const btn=document.getElementById("lmLayoutBtn");
-  if(!ctrl||!body)return;
-  if(lmLayoutH){
-    // 가로: 섹션들을 2열 CSS grid로 재배치
-    ctrl.style.width="860px";ctrl.style.maxWidth="96vw";
-    body.style.display="grid";
-    body.style.gridTemplateColumns="1fr 1fr 1fr";  // 3열
-    body.style.gap="0 4px";
-    body.style.alignItems="start";
-    if(btn)btn.textContent="⇅ 세로";
-  }else{
-    // 세로: 원래 block 레이아웃으로 복원
-    ctrl.style.width="268px";ctrl.style.maxWidth="";
-    body.style.display="block";
-    body.style.gridTemplateColumns="";
-    if(btn)btn.textContent="⇆ 가로";
+/* ══ 라인모드 팔레트 패널 제어 ══ */
+let lmPalSnap='right';   // 현재 스냅 방향: right|left|top|bottom
+let lmPalVisible=true;
+
+const LM_SNAP_ORDER=['right','bottom','left','top']; // 순환 순서
+
+/* 스냅 방향 적용 — 패널 위치·레이아웃 전환 */
+function lmApplySnap(snap){
+  lmPalSnap=snap;
+  const pal=document.getElementById('lmPal');
+  const showBtn=document.getElementById('lmPalShowBtn');
+  const snapBtn=document.getElementById('lmSnapBtn');
+  if(!pal)return;
+  pal.dataset.snap=snap;
+  // 복원 버튼도 같은 방향 기억
+  if(showBtn)showBtn.dataset.snap=snap;
+  // 스냅 버튼 라벨
+  const arrows={right:'→ 하단',bottom:'↓ 좌측',left:'← 상단',top:'↑ 우측'};
+  if(snapBtn)snapBtn.textContent=arrows[snap]||'이동';
+  // 패널 width/height 초기화 (CSS에서 data-snap으로 제어)
+  pal.style.cssText='position:absolute;background:#12141A;display:flex;overflow:hidden;z-index:20;transition:none';
+  // beam projector 로고: 팔레트 방향에 따라 4방향 자동 이동
+  const logo=document.getElementById('lmBeamLogo');
+  if(logo){
+    const pos={
+      right:  {top:'10px', bottom:'auto', left:'12px',  right:'auto'},
+      top:    {top:'auto', bottom:'10px', left:'12px',  right:'auto'},
+      left:   {top:'10px', bottom:'auto', left:'auto',  right:'12px'},
+      bottom: {top:'10px', bottom:'auto', left:'12px',  right:'auto'},
+    }[snap]||{top:'10px',bottom:'auto',left:'12px',right:'auto'};
+    logo.style.top=pos.top; logo.style.bottom=pos.bottom;
+    logo.style.left=pos.left; logo.style.right=pos.right;
   }
+  lmResizePalCanvas();
+  setTimeout(()=>lmDraw(),60);
 }
+
+/* 스냅 순환 이동 버튼 */
+function lmSnapCycle(e){
+  if(e)e.stopPropagation();
+  const idx=LM_SNAP_ORDER.indexOf(lmPalSnap);
+  const next=LM_SNAP_ORDER[(idx+1)%LM_SNAP_ORDER.length];
+  lmApplySnap(next);
+}
+
+/* 팔레트 숨김/복원 */
+function lmTogglePal(){
+  lmPalVisible=!lmPalVisible;
+  const pal=document.getElementById('lmPal');
+  const showBtn=document.getElementById('lmPalShowBtn');
+  if(pal)pal.style.display=lmPalVisible?'flex':'none';
+  if(showBtn){
+    showBtn.style.display=lmPalVisible?'none':'block';
+    showBtn.dataset.snap=lmPalSnap;
+    // 복원 버튼 위치를 스냅 방향에 맞게 조정
+    const pos={
+      right: 'right:0;top:50%;transform:translateY(-50%);left:auto;bottom:auto;border-radius:6px 0 0 6px',
+      left:  'left:0;top:50%;transform:translateY(-50%);right:auto;bottom:auto;border-radius:0 6px 6px 0',
+      top:   'top:0;left:50%;transform:translateX(-50%);right:auto;bottom:auto;border-radius:0 0 6px 6px',
+      bottom:'bottom:0;left:50%;transform:translateX(-50%);right:auto;top:auto;border-radius:6px 6px 0 0',
+    };
+    showBtn.style.cssText=`display:block;position:absolute;${pos[lmPalSnap]||pos.right};
+      background:#12141A;color:#60A5FA;border:1px solid #1E2130;
+      padding:8px 5px;cursor:pointer;font-size:11px;font-family:'맑은 고딕',sans-serif;
+      font-weight:700;z-index:21;letter-spacing:1px;writing-mode:vertical-rl`;
+  }
+  lmResizePalCanvas();
+}
+
+/* 캔버스 크기 — 패널이 차지하는 공간을 빼고 조정 */
+function lmResizePalCanvas(){
+  if(!lmCanvas)return;
+  const mo=document.getElementById('lineMo');
+  const pal=document.getElementById('lmPal');
+  if(!mo)return;
+  const mw=mo.offsetWidth||window.innerWidth;
+  const mh=mo.offsetHeight||window.innerHeight;
+  const PAL_W=260, PAL_H_MAX=Math.round(mh*0.52);
+  if(!lmPalVisible||!pal){
+    lmCanvas.style.cssText='position:absolute;inset:0;width:100%;height:100%;cursor:crosshair;background:#000';
+    lmCanvas.width=mw; lmCanvas.height=mh;
+    return;
+  }
+  // 스냅 방향별 캔버스 영역 계산
+  let cLeft=0,cTop=0,cW=mw,cH=mh;
+  if(lmPalSnap==='right') {cW=mw-PAL_W;}
+  else if(lmPalSnap==='left') {cLeft=PAL_W;cW=mw-PAL_W;}
+  else if(lmPalSnap==='top') {const h=pal.offsetHeight||PAL_H_MAX;cTop=h;cH=mh-h;}
+  else if(lmPalSnap==='bottom'){const h=pal.offsetHeight||PAL_H_MAX;cH=mh-h;}
+  lmCanvas.style.cssText=`position:absolute;top:${cTop}px;left:${cLeft}px;width:${cW}px;height:${cH}px;cursor:crosshair;background:#000`;
+  lmCanvas.width=Math.max(cW,1); lmCanvas.height=Math.max(cH,1);
+}
+
+/* 드래그 → 4방향 스냅 (드래그 중 가이드 표시, 놓으면 가장 가까운 端으로 스냅) */
+function lmInitPalDrag(){
+  const handle=document.getElementById('lmPalHandle');
+  const pal=document.getElementById('lmPal');
+  if(!handle||!pal)return;
+  // 스냅 가이드 오버레이 4개 생성
+  const guides={};
+  ['right','left','top','bottom'].forEach(s=>{
+    const g=document.createElement('div');
+    g.className='lm-snap-guide';
+    g.dataset.s=s;
+    document.getElementById('lineMo').appendChild(g);
+    guides[s]=g;
+  });
+  function posGuides(){
+    const mw=window.innerWidth,mh=window.innerHeight;
+    const W=230,H=Math.round(mh*.45);
+    const cfg={
+      right: {left:mw-W,top:0,width:W,height:mh},
+      left:  {left:0,top:0,width:W,height:mh},
+      top:   {left:0,top:0,width:mw,height:H},
+      bottom:{left:0,top:mh-H,width:mw,height:H},
+    };
+    Object.entries(cfg).forEach(([s,r])=>{
+      Object.assign(guides[s].style,{left:r.left+'px',top:r.top+'px',width:r.width+'px',height:r.height+'px'});
+    });
+  }
+  function snapFor(mx,my){
+    const mw=window.innerWidth,mh=window.innerHeight;
+    const ZONE=Math.min(mw,mh)*0.28; // 스냅 감지 존 (28%)
+    if(mx>mw-ZONE) return 'right';
+    if(mx<ZONE)    return 'left';
+    if(my<ZONE)    return 'top';
+    if(my>mh-ZONE) return 'bottom';
+    return null;
+  }
+  handle.addEventListener('mousedown',ev=>{
+    if(ev.target.tagName==='BUTTON')return;
+    ev.preventDefault();
+    posGuides();
+    handle.style.cursor='grabbing';
+    let cur=null;
+    function onMove(e){
+      const s=snapFor(e.clientX,e.clientY);
+      if(s!==cur){
+        cur=s;
+        Object.values(guides).forEach(g=>g.classList.remove('on'));
+        if(s)guides[s].classList.add('on');
+      }
+    }
+    function onUp(e){
+      handle.style.cursor='grab';
+      Object.values(guides).forEach(g=>g.classList.remove('on'));
+      document.removeEventListener('mousemove',onMove);
+      document.removeEventListener('mouseup',onUp);
+      const s=snapFor(e.clientX,e.clientY);
+      if(s&&s!==lmPalSnap){lmApplySnap(s);setTimeout(()=>lmDraw(),60);}
+    }
+    document.addEventListener('mousemove',onMove);
+    document.addEventListener('mouseup',onUp);
+  });
+  // 터치 지원
+  handle.addEventListener('touchstart',ev=>{
+    if(ev.target.tagName==='BUTTON')return;
+    posGuides();
+    function onMove(e){
+      const t=e.touches[0];
+      const s=snapFor(t.clientX,t.clientY);
+      Object.values(guides).forEach(g=>g.classList.remove('on'));
+      if(s)guides[s].classList.add('on');
+    }
+    function onEnd(e){
+      Object.values(guides).forEach(g=>g.classList.remove('on'));
+      handle.removeEventListener('touchmove',onMove);
+      handle.removeEventListener('touchend',onEnd);
+      const t=e.changedTouches[0];
+      const s=snapFor(t.clientX,t.clientY);
+      if(s&&s!==lmPalSnap){lmApplySnap(s);setTimeout(()=>lmDraw(),60);}
+    }
+    handle.addEventListener('touchmove',onMove,{passive:true});
+    handle.addEventListener('touchend',onEnd,{passive:true});
+  },{passive:true});
+}
+
+
+/* 이전 탭 관련 함수 — 팔레트 방식에선 미사용, 오류 방지용 stub */
+
+
 
 /* === Line Mode (Python open_line_mode() 완전 동일 구현) === */
 const LM_LINE_OPTS=[
@@ -2164,119 +3674,334 @@ const LM_CR_PALETTE=[
   "#FF7C00","#BF5AF2","#FF2D78","#00E5BE",
   "#A8FF3E","#FF9500","#5AC8FA","#FF6B6B",
 ];
+// ── 세션 유지 상태 (라인모드 닫아도 유지) ──────────────────────
 let lmState={scale:1.0,colorRotate:false};
 let lmFocusIdx=-1;
 let lmLineColor="#00C020";
 let lmGridDim="#1A3D1A",lmGrid500="#2D6E2D",lmGridEdge="#3D9140";
-let lmOx=0;
+let lmOx=0;          // X 오프셋 — 세션 전체에서 유지
+let lmOy=0;          // Y 오프셋 — 세션 전체에서 유지
 let lmCtrlVisible=true;
-let lmFilmIdx=0;  // 현재 표시 Film 인덱스 (Full 모달과 연동)
+let lmFilmIdx=0;
 let lmCanvas=null,lmCtx=null;
+// 그리드 치수 저장 목록 (세션 + localStorage 영속)
+let lmGridDimSaves=[];
+
+function lmSaveGridDims(){
+  const xInp=document.getElementById("lmEdgeXInp")?.value.trim()||"";
+  const yInp=document.getElementById("lmEdgeYInp")?.value.trim()||"";
+  const xRepeat=document.getElementById("lmEdgeXRepeat")?.checked||false;
+  const yRepeat=document.getElementById("lmEdgeYRepeat")?.checked||false;
+  const gx=document.getElementById("lmGridStepX500")?.value.trim()||"";
+  const gy=document.getElementById("lmGridStepY500")?.value.trim()||"";
+  const unit=document.getElementById("lmGridUnit")?.value||"mm";
+  // 라벨: 한 줄에 들어오도록 짧게 표시
+  const label=`(그리드간격) x:${gx||"-"} y:${gy||"-"}`;
+  const entry={label,xInp,yInp,xRepeat,yRepeat,gx,gy,unit,ts:Date.now()};
+  // 동일 라벨 덮어쓰기
+  const idx=lmGridDimSaves.findIndex(e=>e.label===label);
+  if(idx>=0)lmGridDimSaves[idx]=entry;else lmGridDimSaves.push(entry);
+  // 최대 10개 유지
+  if(lmGridDimSaves.length>10)lmGridDimSaves.shift();
+  try{localStorage.setItem("lm_grid_dims",JSON.stringify(lmGridDimSaves));}catch(e){}
+  _lmRefreshDimSlot();
+  document.getElementById("lmGridDimStatus").textContent="✅ 저장됨: "+label;
+  setTimeout(()=>{const el=document.getElementById("lmGridDimStatus");if(el)el.textContent="";},2000);
+}
+function _lmRefreshDimSlot(){
+  const sel=document.getElementById("lmGridDimSlot");if(!sel)return;
+  const cur=sel.value;
+  sel.innerHTML='<option value="">— 선택안함 —</option>'+
+    lmGridDimSaves.map((e,i)=>
+      `<option value="${i}">(그리드간격) x:${e.gx||"-"} y:${e.gy||"-"}</option>`
+    ).join("");
+  if(cur)sel.value=cur;
+}
+/* 수동 저장: 💾 저장 버튼 클릭 시 호출 */
+function lmAutoSaveGridDims(){
+  const gx=document.getElementById("lmGridStepX500")?.value.trim()||"";
+  const gy=document.getElementById("lmGridStepY500")?.value.trim()||"";
+  if(!gx&&!gy){
+    const st=document.getElementById("lmGridDimStatus");
+    if(st){st.textContent="⚠ 간격을 입력하세요";setTimeout(()=>{if(st)st.textContent="";},1800);}
+    return;
+  }
+  lmSaveGridDims();
+}
+/* 드롭다운 선택 시 자동 불러오기 */
+function lmAutoLoadGridDims(){
+  const sel=document.getElementById("lmGridDimSlot");
+  if(!sel||sel.value==="")return;
+  const idx=parseInt(sel.value);
+  if(isNaN(idx)||!lmGridDimSaves[idx])return;
+  const e=lmGridDimSaves[idx];
+  const xEl=document.getElementById("lmEdgeXInp");if(xEl)xEl.value=e.xInp||"";
+  const yEl=document.getElementById("lmEdgeYInp");if(yEl)yEl.value=e.yInp||"";
+  const xrEl=document.getElementById("lmEdgeXRepeat");if(xrEl)xrEl.checked=e.xRepeat||false;
+  const yrEl=document.getElementById("lmEdgeYRepeat");if(yrEl)yrEl.checked=e.yRepeat||false;
+  const gxEl=document.getElementById("lmGridStepX500");if(gxEl)gxEl.value=e.gx||"";
+  const gyEl=document.getElementById("lmGridStepY500");if(gyEl)gyEl.value=e.gy||"";
+  const uEl=document.getElementById("lmGridUnit");if(uEl&&e.unit)uEl.value=e.unit;
+  lmUpdateEdgeUnitLabels();lmEdgeApply();
+  const st=document.getElementById("lmGridDimStatus");
+  if(st){st.textContent="📂 불러옴: "+e.label;setTimeout(()=>{if(st)st.textContent="";},1800);}
+  lmDraw();
+}
+/* 선택한 항목 삭제 */
+function lmDeleteGridDims(){
+  const sel=document.getElementById("lmGridDimSlot");
+  if(!sel||sel.value===""){toast("삭제할 항목을 선택하세요");return;}
+  const idx=parseInt(sel.value);
+  if(isNaN(idx)||!lmGridDimSaves[idx])return;
+  const removed=lmGridDimSaves.splice(idx,1)[0];
+  try{localStorage.setItem("lm_grid_dims",JSON.stringify(lmGridDimSaves));}catch(e){}
+  _lmRefreshDimSlot();
+  const st=document.getElementById("lmGridDimStatus");
+  if(st){st.textContent="🗑 삭제됨: "+removed.label;setTimeout(()=>{if(st)st.textContent="";},1800);}
+}
+// localStorage에서 치수 목록 복원
+try{const s=localStorage.getItem("lm_grid_dims");if(s)lmGridDimSaves=JSON.parse(s);}catch(e){}
+
+// ── 폭 강조선 상태 (확인버튼으로 확정) ──────────────────
+let lmEdgeState={xList:[],xStep:0,xRepeat:false,yList:[],yStep:0,yRepeat:false};
+
+// 반복모드: step 간격마다 강조선 위치 배열 생성
+function _lmEdgeRepeat(stepInput,maxMm,u2mm){
+  const stepMm=stepInput*u2mm;
+  if(stepMm<=0)return[];
+  const out=[];
+  for(let v=stepMm;v<maxMm;v+=stepMm)out.push(v);
+  return out;
+}
+
+// 확인버튼: 입력값 파싱 → lmEdgeState 저장 → lmDraw
+function lmEdgeApply(){
+  // X (가로/수직선)
+  const xRaw=document.getElementById("lmEdgeXInp")?.value.trim()||"";
+  const xRepeat=document.getElementById("lmEdgeXRepeat")?.checked||false;
+  const xNums=xRaw.split(/[,\s]+/).map(v=>parseFloat(v)).filter(v=>v>0);
+  lmEdgeState.xRepeat=xRepeat;
+  if(xRepeat){lmEdgeState.xStep=xNums[0]||0;lmEdgeState.xList=[];}
+  else{lmEdgeState.xList=xNums;lmEdgeState.xStep=0;}
+  // Y (세로/수평선)
+  const yRaw=document.getElementById("lmEdgeYInp")?.value.trim()||"";
+  const yRepeat=document.getElementById("lmEdgeYRepeat")?.checked||false;
+  const yNums=yRaw.split(/[,\s]+/).map(v=>parseFloat(v)).filter(v=>v>0);
+  lmEdgeState.yRepeat=yRepeat;
+  if(yRepeat){lmEdgeState.yStep=yNums[0]||0;lmEdgeState.yList=[];}
+  else{lmEdgeState.yList=yNums;lmEdgeState.yStep=0;}
+  lmDraw();
+}
+
+function lmUpdateEdgeUnitLabels(){
+  const unit=document.getElementById("lmGridUnit")?.value||"mm";
+  const label="("+unit+")";
+  const ex=document.getElementById("lmEdgeXUnit");if(ex)ex.textContent=label;
+  const ey=document.getElementById("lmEdgeYUnit");if(ey)ey.textContent=label;
+  const gx=document.getElementById("lmGridXUnit");if(gx)gx.textContent=label;
+  const gy=document.getElementById("lmGridYUnit");if(gy)gy.textContent=label;
+}
 
 function openLineMode(){
   if(!results.length){toast("먼저 배치 계산이 필요합니다");return;}
   lmFilmIdx=fF>=0&&fF<results.length?fF:0;
-  lmState={scale:1.0,colorRotate:false};
-  lmFocusIdx=-1;lmOx=0;
-  // 캔버스 세팅
+  lmState.colorRotate=false;
+  lmFocusIdx=-1;
   lmCanvas=document.getElementById("lmCv");
   lmCtx=lmCanvas.getContext("2d");
-  // 모달 표시
   const mo=document.getElementById("lineMo");
-  mo.style.display="flex";
+  mo.style.display="block";
   // 스와치 빌드
   _lmBuildLineSwatches();
   _lmBuildGridSwatches();
-  // ox 입력 초기화
-  document.getElementById("lmOxInp").value=0;
-  // 색회전 버튼 초기화
+  // ox/oy — 세션 유지 (초기화 안 함)
+  // 그리드 치수 기본값
+  const _xInpEl=document.getElementById("lmEdgeXInp");if(_xInpEl)_xInpEl.value="";
+  const _yInpEl=document.getElementById("lmEdgeYInp");if(_yInpEl)_yInpEl.value="";
+  const _xRepEl=document.getElementById("lmEdgeXRepeat");if(_xRepEl)_xRepEl.checked=false;
+  const _yRepEl=document.getElementById("lmEdgeYRepeat");if(_yRepEl)_yRepEl.checked=false;
+  lmEdgeState={xList:[],xStep:0,xRepeat:false,yList:[],yStep:0,yRepeat:false};
+  lmUpdateEdgeUnitLabels();
+  _lmRefreshDimSlot();
+  // 색회전 버튼 상태
   const crb=document.getElementById("lmCrBtn");
-  crb.textContent="○ 색회전  OFF";crb.style.background="#1E2128";crb.style.color="#6B7280";
-  // 제어판 표시
-  lmCtrlVisible=true;
-  const ctrl=document.getElementById("lmCtrl");
-  ctrl.style.display="block";
-  /* 제어판 드래그 초기화 — 매번 리셋 */
-  ctrl.style.right="10px"; ctrl.style.top="40px"; ctrl.style.left=""; ctrl.style.bottom="";
-  const handle=document.getElementById("lmCtrlHandle");
-  handle.onmousedown=function(ev){
-    ev.preventDefault();
-    const rect=ctrl.getBoundingClientRect();
-    let ox=ev.clientX-rect.left, oy=ev.clientY-rect.top;
-    handle.style.cursor="grabbing";
-    function onMove(e){
-      let nx=e.clientX-ox, ny=e.clientY-oy;
-      nx=Math.max(0,Math.min(window.innerWidth-ctrl.offsetWidth,nx));
-      ny=Math.max(0,Math.min(window.innerHeight-ctrl.offsetHeight,ny));
-      ctrl.style.left=nx+"px"; ctrl.style.top=ny+"px";
-      ctrl.style.right="auto";
-    }
-    function onUp(){ handle.style.cursor="grab"; document.removeEventListener("mousemove",onMove); document.removeEventListener("mouseup",onUp); }
-    document.addEventListener("mousemove",onMove);
-    document.addEventListener("mouseup",onUp);
-  };
-  // 키보드 이벤트
+  if(crb){
+    crb.textContent=lmState.colorRotate?"● 색회전  ON":"○ 색회전  OFF";
+    crb.style.background=lmState.colorRotate?"#7C3AED":"#1A1D23";
+    crb.style.color=lmState.colorRotate?"#FFFFFF":"#6B7280";
+  }
+  // 팔레트 패널 초기화 — 스냅 방향 적용 + 드래그 설정
+  lmPalVisible=true;
+  const pal=document.getElementById('lmPal');
+  const showBtn=document.getElementById('lmPalShowBtn');
+  if(pal){pal.style.display='flex';}
+  if(showBtn){showBtn.style.display='none';}
+  lmApplySnap(lmPalSnap);
+  lmInitPalDrag();
+  // 키보드
   document.addEventListener("keydown",lmKeyDown);
   setTimeout(()=>{
-    lmCanvas.width=lmCanvas.offsetWidth;
-    lmCanvas.height=lmCanvas.offsetHeight;
+    lmResizePalCanvas();
     _updLmFlipBtns();
     lmDraw();
-  },60);
-  // 마우스휠
+  },80);
   lmCanvas.onwheel=e=>{e.preventDefault();lmState.scale*=e.deltaY<0?1.1:0.9;lmDraw();};
+  // 조각 드래그 초기화 (한 번만)
+  if(!lmCanvas._lmDragBound){lmCanvas._lmDragBound=true;_lmInitDrag();}
+  // Line Mode 더블클릭 숨김 토글
+  if(!lmCanvas._lmDblBound){
+    lmCanvas._lmDblBound=true;
+    lmCanvas.addEventListener("dblclick",e=>{
+      const r=lmCanvas.getBoundingClientRect();
+      _lmToggleHidden(e.clientX-r.left,e.clientY-r.top);
+    });
+    let _lmLastTap=0;
+    lmCanvas.addEventListener("touchend",e=>{
+      const now=Date.now();
+      if(now-_lmLastTap<300&&e.changedTouches.length===1){
+        const r=lmCanvas.getBoundingClientRect();
+        const t=e.changedTouches[0];
+        _lmToggleHidden(t.clientX-r.left,t.clientY-r.top);
+      }
+      _lmLastTap=now;
+    },{passive:true});
+  }
 }
 
+function _lmToggleHidden(mx,my){
+  if(!lmCanvas||!results.length||lmFilmIdx>=results.length)return;
+  const res=results[lmFilmIdx],panel=res.panel,placed=res.placed;
+  const cw=lmCanvas.width||window.innerWidth,ch=lmCanvas.height||window.innerHeight;
+  const pad=100,sc=Math.min((cw-pad)/panel.length,(ch-pad)/panel.width)*lmState.scale;
+  const fi=lmFocusIdx;
+  let ox,oy;
+  if(fi===-1){ox=(cw-panel.length*sc)/2+lmOx;oy=(ch-panel.width*sc)/2+lmOy;}
+  else{const fi2=Math.min(fi,placed.length-1);if(fi2<0){ox=(cw-panel.length*sc)/2+lmOx;oy=(ch-panel.width*sc)/2+lmOy;}else{const part=placed[fi2];ox=(cw/2)-(part.x+part.length/2)*sc+lmOx;oy=(ch-panel.width*sc)/2+lmOy;}}
+  const pi=lmFilmIdx;
+  for(let i=placed.length-1;i>=0;i--){
+    const p=placed[i];
+    const bx1=ox+p.x*sc,by1=oy+p.y*sc,bw=p.length*sc,bh=p.width*sc;
+    if(mx>=bx1&&mx<=bx1+bw&&my>=by1&&my<=by1+bh){
+      const ji=p._ji;
+      if(ji===undefined||ji===null||!parts[pi]||!parts[pi][ji])return;
+      pushUndo();
+      const cur=parseInt(parts[pi][ji].quantity)||1;
+      if(cur>1){
+        parts[pi][ji].quantity=cur-1;
+        const tbl=document.getElementById(`ct_${pi}`);
+        if(tbl){const rows=tbl.querySelectorAll(".crow");if(rows[ji]){const qInp=rows[ji].querySelector('input[data-col="quantity"]');if(qInp)qInp.value=cur-1;}}
+        toast(`✂ ${p.name||"조각"} 수량 ${cur}→${cur-1}`);
+      } else {
+        if(parts[pi].length>1){parts[pi].splice(ji,1);rebuildSec(pi);toast(`🗑 ${p.name||"조각"} 삭제`);}
+        else{parts[pi][ji].length="";parts[pi][ji].width="";parts[pi][ji].quantity=1;rebuildSec(pi);toast(`✂ ${p.name||"조각"} 초기화`);}
+      }
+      schedCalc();
+      return;
+    }
+  }
+}
 function closeLineMode(){
   document.getElementById("lineMo").style.display="none";
   document.removeEventListener("keydown",lmKeyDown);
 }
 
-function lmToggleCtrl(){
-  lmCtrlVisible=!lmCtrlVisible;
-  document.getElementById("lmCtrl").style.display=lmCtrlVisible?"block":"none";
+
+
+// 색상 밝기 조절 헬퍼 (hex, delta -255~255)
+function lmAdjustColor(hex,delta){
+  let r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16);
+  r=Math.max(0,Math.min(255,r+delta));g=Math.max(0,Math.min(255,g+delta));b=Math.max(0,Math.min(255,b+delta));
+  return"#"+[r,g,b].map(v=>v.toString(16).padStart(2,"0")).join("");
 }
 
 function _lmBuildLineSwatches(){
   const box=document.getElementById("lmLineSwatches");box.innerHTML="";
+  const bBase="border-radius:4px;padding:3px 5px;cursor:pointer;font-size:9px;font-weight:700;font-family:'맑은 고딕',sans-serif;white-space:nowrap;flex-shrink:0";
   LM_LINE_OPTS.forEach(({lb,c})=>{
     const b=document.createElement("button");
     const isDark=(parseInt(c.slice(1,3),16)+parseInt(c.slice(3,5),16)+parseInt(c.slice(5,7),16))<400;
     const fg=isDark?"#FFF":"#111";
     b.textContent=lb;b.dataset.c=c;
-    Object.assign(b.style,{background:c,color:fg,border:c===lmLineColor?"2px solid #FFF":"2px solid transparent",borderRadius:"4px",padding:"3px 6px",cursor:"pointer",fontSize:"11px",fontFamily:"'맑은 고딕',sans-serif"});
+    b.style.cssText=bBase+`;background:${c};color:${fg};border:${c===lmLineColor?"2px solid #FFF":"2px solid transparent"}`;
     b.addEventListener("click",()=>{
       lmLineColor=c;
-      box.querySelectorAll("button").forEach(bb=>{bb.style.border=bb.dataset.c===c?"2px solid #FFF":"2px solid transparent";});
+      box.querySelectorAll("button[data-c]").forEach(bb=>{bb.style.border=bb.dataset.c===c?"2px solid #FFF":"2px solid transparent";});
+      const rb=document.getElementById("lmLineRainbowBtn");if(rb)rb.style.outline="none";
       lmDraw();
     });
     box.appendChild(b);
   });
+  // 무지개 선택 버튼 — 적 바로 우측
+  const wrap=document.createElement("span");
+  wrap.style.cssText="position:relative;display:inline-flex;align-items:center;flex-shrink:0";
+  const rb=document.createElement("button");
+  rb.id="lmLineRainbowBtn";rb.title="색상 직접 선택";
+  rb.style.cssText=bBase+";background:linear-gradient(90deg,#ff4e50,#f9d423,#56ab2f,#11998e,#2980b9,#8e44ad);color:#fff;border:2px solid rgba(255,255,255,.15);text-shadow:0 1px 3px rgba(0,0,0,.8);outline:none";
+  rb.textContent="선택";
+  const hiddenPk=document.createElement("input");
+  hiddenPk.type="color";hiddenPk.id="lmLineColorPicker";hiddenPk.value=lmLineColor;
+  hiddenPk.style.cssText="position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;border:none;padding:0;margin:0";
+  hiddenPk.addEventListener("input",()=>{
+    const c=hiddenPk.value;
+    lmLineColor=c;
+    box.querySelectorAll("button[data-c]").forEach(bb=>{bb.style.border="2px solid transparent";});
+    rb.style.outline="2px solid #fff";rb.style.outlineOffset="1px";
+    lmDraw();
+  });
+  wrap.appendChild(rb);wrap.appendChild(hiddenPk);
+  box.appendChild(wrap);
 }
 
 function _lmBuildGridSwatches(){
   const box=document.getElementById("lmGridSwatches");box.innerHTML="";
+  const bBase="border-radius:4px;padding:3px 5px;cursor:pointer;font-size:9px;font-weight:700;font-family:'맑은 고딕',sans-serif;white-space:nowrap;flex-shrink:0";
   LM_GRID_PRESETS.forEach(({nm,dim,g500,edge})=>{
     const b=document.createElement("button");
     b.textContent=nm;b.dataset.nm=nm;
     const isActive=(nm==="어둠");
-    Object.assign(b.style,{background:isActive?"#2C313C":"#1E2128",color:isActive?"#CDD0D6":"#6B7280",border:isActive?"2px solid #CDD0D6":"2px solid transparent",borderRadius:"4px",padding:"4px 7px",cursor:"pointer",fontSize:"10px",fontWeight:"700",fontFamily:"'맑은 고딕',sans-serif"});
+    b.style.cssText=bBase+`;background:${isActive?"#2C313C":"#1E2128"};color:${isActive?"#CDD0D6":"#6B7280"};border:${isActive?"2px solid #CDD0D6":"2px solid transparent"}`;
     b.addEventListener("click",()=>{
       lmGridDim=dim;lmGrid500=g500;lmGridEdge=edge;
-      box.querySelectorAll("button").forEach(bb=>{
+      box.querySelectorAll("button[data-nm]").forEach(bb=>{
         const sel=bb.dataset.nm===nm;
         bb.style.background=sel?"#2C313C":"#1E2128";
         bb.style.color=sel?"#CDD0D6":"#6B7280";
         bb.style.border=sel?"2px solid #CDD0D6":"2px solid transparent";
       });
+      const cb=document.getElementById("lmGridCustomBtn");if(cb)cb.style.outline="none";
       lmDraw();
     });
     box.appendChild(b);
+    // 꺼짐 바로 뒤 — 선택 버튼 (무지개)
+    if(nm==="꺼짐"){
+      const wrap=document.createElement("span");
+      wrap.style.cssText="position:relative;display:inline-flex;align-items:center;flex-shrink:0";
+      const cb=document.createElement("button");
+      cb.id="lmGridCustomBtn";cb.title="그리드 색상 직접 선택";
+      cb.style.cssText=bBase+";background:linear-gradient(90deg,#ff4e50,#f9d423,#56ab2f,#11998e,#2980b9,#8e44ad);color:#fff;border:2px solid rgba(255,255,255,.15);text-shadow:0 1px 3px rgba(0,0,0,.8);outline:none";
+      cb.textContent="선택";
+      const hiddenPk=document.createElement("input");
+      hiddenPk.type="color";hiddenPk.id="lmGridColorPicker";hiddenPk.value=lmGrid500;
+      hiddenPk.style.cssText="position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;border:none;padding:0;margin:0";
+      hiddenPk.addEventListener("input",()=>{
+        const c=hiddenPk.value;
+        lmGridDim=lmAdjustColor(c,-40);lmGrid500=c;lmGridEdge=lmAdjustColor(c,40);
+        box.querySelectorAll("button[data-nm]").forEach(bb=>{
+          bb.style.background="#1E2128";bb.style.color="#6B7280";bb.style.border="2px solid transparent";
+        });
+        cb.style.outline="2px solid #fff";cb.style.outlineOffset="1px";
+        lmDraw();
+      });
+      wrap.appendChild(cb);wrap.appendChild(hiddenPk);
+      box.appendChild(wrap);
+    }
   });
 }
 
 function lmZoom(f){lmState.scale*=f;lmDraw();}
-function lmReset(){lmState.scale=1.0;lmOx=0;document.getElementById("lmOxInp").value=0;lmFocusIdx=-1;lmDraw();}
+function lmReset(){
+  lmState.scale=1.0;lmFocusIdx=-1;lmOx=0;lmOy=0;lmDraw();
+}
 function lmNav(dir){
   if(!results.length||lmFilmIdx>=results.length)return;
   const n=results[lmFilmIdx].placed.length;
@@ -2284,9 +4009,8 @@ function lmNav(dir){
   else lmFocusIdx=lmFocusIdx<=0?-1:lmFocusIdx-1;
   lmDraw();
 }
-function lmOxStep(px){
-  lmOx+=px;document.getElementById("lmOxInp").value=lmOx;lmDraw();
-}
+function lmOxStep(px){lmOx+=px;lmDraw();}
+function lmOyStep(py){lmOy+=py;lmDraw();}
 function lmToggleCr(){
   lmState.colorRotate=!lmState.colorRotate;
   const on=lmState.colorRotate,b=document.getElementById("lmCrBtn");
@@ -2304,15 +4028,15 @@ function lmKeyDown(e){
   if(ae&&ae.type==="range")return;
   if(e.key==="ArrowRight"){lmOxStep(+100);}
   else if(e.key==="ArrowLeft"){lmOxStep(-100);}
-  else if(e.key==="ArrowUp"){lmState.scale*=1.1;lmDraw();}
-  else if(e.key==="ArrowDown"){lmState.scale/=1.1;lmDraw();}
+  else if(e.key==="ArrowUp"){lmOyStep(-80);}
+  else if(e.key==="ArrowDown"){lmOyStep(+80);}
+  else if(e.key==="+"||e.key==="="||e.key==="NumpadAdd"){lmZoom(1.2);}
+  else if(e.key==="-"||e.key==="NumpadSubtract"){lmZoom(0.833);}
   else if(e.key==="Escape"){lmFocusIdx=-1;lmDraw();}
 }
 
 function lmDraw(){
   if(!lmCanvas||!lmCtx||!results.length)return;
-  const ox_inp=parseInt(document.getElementById("lmOxInp").value)||0;
-  lmOx=ox_inp;
   const ctx=lmCtx,cw=lmCanvas.width||window.innerWidth,ch=lmCanvas.height||window.innerHeight;
   ctx.clearRect(0,0,cw,ch);
   if(lmFilmIdx>=results.length)return;
@@ -2324,53 +4048,69 @@ function lmDraw(){
   const sc=scBase*lmState.scale;
   let ox,oy;
   if(fi===-1){
-    ox=(cw-pLen*sc)/2+lmOx;oy=(ch-pWid*sc)/2;
-    document.getElementById("lmFocusLbl").textContent="전체보기  |  ▶ 로 이동";
+    ox=(cw-pLen*sc)/2+lmOx;oy=(ch-pWid*sc)/2+lmOy;
   } else {
     const fi2=Math.min(fi,placed.length-1);
-    if(fi2<0){ox=(cw-pLen*sc)/2+lmOx;oy=(ch-pWid*sc)/2;}
+    if(fi2<0){ox=(cw-pLen*sc)/2+lmOx;oy=(ch-pWid*sc)/2+lmOy;}
     else{
       const part=placed[fi2];
       const partCx=part.x+part.length/2;
-      ox=(cw/2)-partCx*sc+lmOx;oy=(ch-pWid*sc)/2;
+      ox=(cw/2)-partCx*sc+lmOx;oy=(ch-pWid*sc)/2+lmOy;
     }
-    document.getElementById("lmFocusLbl").textContent=`조각 ${fi2+1}/${placed.length}  |  Esc : 전체보기`;
   }
   const px1=ox,py1=oy,px2=ox+pLen*sc,py2=oy+pWid*sc;
+  // 드래그 히트테스트용 스케일 상태 저장
+  _lmScSt={ox,oy,scale:sc};
 
   // ── 그리드 점선 ──────────────────────────────────
-  const gridIntervals=[10,50,100,500,1000];
-  let baseIv=gridIntervals[gridIntervals.length-1];
-  for(const iv of gridIntervals){if(iv*scBase>=6){baseIv=iv;break;}}
-  if(baseIv<100)baseIv=100;
+  const _gridUnit=(document.getElementById("lmGridUnit")?.value)||"mm";
+  const _u2mm={"mm":1,"cm":10,"m":1000,"2.54cm":25.4}[_gridUnit]||1;
+  const _rawX=document.getElementById("lmGridStepX500")?.value.trim();
+  const _rawY=document.getElementById("lmGridStepY500")?.value.trim();
+  const baseIvX=_rawX?Math.max(1,parseFloat(_rawX)*_u2mm):0;
+  const baseIvY=_rawY?Math.max(1,parseFloat(_rawY)*_u2mm):0;
   const D_THIN=[2,6],D_BOLD=[4,4];
-  // 수직선
-  for(let xmm=baseIv;xmm<pLen;xmm+=baseIv){
-    const xp=px1+xmm*sc;
-    if(xp>px1&&xp<px2){
-      const is500=(xmm%500===0);
-      ctx.strokeStyle=is500?lmGrid500:lmGridDim;
-      const gridLW=parseFloat(document.getElementById("lmGridLW")?.value)||1;
-      ctx.lineWidth=is500?gridLW*1.8:gridLW;
-      ctx.setLineDash(is500?D_BOLD:D_THIN);
-      ctx.beginPath();ctx.moveTo(xp,py1);ctx.lineTo(xp,py2);ctx.stroke();
+  const gridLW=parseFloat(document.getElementById("lmGridLW")?.value)||1;
+  // 수직선 (가로 간격) — 그리드 간격이 설정된 경우에만 표시
+  if(baseIvX>0){
+    ctx.strokeStyle=lmGridDim;
+    ctx.lineWidth=gridLW;
+    ctx.setLineDash(D_THIN);
+    for(let xmm=baseIvX;xmm<pLen;xmm+=baseIvX){
+      const xp=px1+xmm*sc;
+      if(xp>px1&&xp<px2){
+        ctx.beginPath();ctx.moveTo(xp,py1);ctx.lineTo(xp,py2);ctx.stroke();
+      }
     }
   }
-  // 수평선
-  for(let ymm=baseIv;ymm<pWid;ymm+=baseIv){
-    const yp=py1+ymm*sc;
-    if(yp>py1&&yp<py2){
-      ctx.strokeStyle=lmGridDim;ctx.lineWidth=1;ctx.setLineDash(D_THIN);
-      ctx.beginPath();ctx.moveTo(px1,yp);ctx.lineTo(px2,yp);ctx.stroke();
+  // 수평선 (세로 간격) — 그리드 간격이 설정된 경우에만 표시
+  if(baseIvY>0){
+    ctx.strokeStyle=lmGridDim;
+    ctx.lineWidth=gridLW;
+    ctx.setLineDash(D_THIN);
+    for(let ymm=baseIvY;ymm<pWid;ymm+=baseIvY){
+      const yp=py1+ymm*sc;
+      if(yp>py1&&yp<py2){
+        ctx.beginPath();ctx.moveTo(px1,yp);ctx.lineTo(px2,yp);ctx.stroke();
+      }
     }
   }
-  // 폭 강조선: 10, 610, 1210mm 고정
-  for(const ey of[10,610,1210]){
-    if(ey>0&&ey<pWid){
-      const yp=py1+ey*sc;
-      const gridLW2=parseFloat(document.getElementById("lmGridLW")?.value)||1;
-      ctx.strokeStyle=lmGridEdge;ctx.lineWidth=gridLW2*2;ctx.setLineDash(D_BOLD);
-      ctx.beginPath();ctx.moveTo(px1,yp);ctx.lineTo(px2,yp);ctx.stroke();
+  // ── 폭 강조선 (lmEdgeState 기반) ──
+  {
+    ctx.strokeStyle=lmGridEdge;ctx.lineWidth=gridLW*2;ctx.setLineDash(D_BOLD);
+    // 가로 강조선 (수직선) — X축
+    const _xVals=lmEdgeState.xRepeat
+      ? (lmEdgeState.xStep>0 ? _lmEdgeRepeat(lmEdgeState.xStep,pLen,_u2mm) : [])
+      : lmEdgeState.xList.map(v=>v*_u2mm);
+    for(const xv of _xVals){
+      if(xv>0&&xv<pLen){const xp=px1+xv*sc;ctx.beginPath();ctx.moveTo(xp,py1);ctx.lineTo(xp,py2);ctx.stroke();}
+    }
+    // 세로 강조선 (수평선) — Y축
+    const _yVals=lmEdgeState.yRepeat
+      ? (lmEdgeState.yStep>0 ? _lmEdgeRepeat(lmEdgeState.yStep,pWid,_u2mm) : [])
+      : lmEdgeState.yList.map(v=>v*_u2mm);
+    for(const yv of _yVals){
+      if(yv>0&&yv<pWid){const yp=py1+yv*sc;ctx.beginPath();ctx.moveTo(px1,yp);ctx.lineTo(px2,yp);ctx.stroke();}
     }
   }
   ctx.setLineDash([]);
@@ -2431,17 +4171,28 @@ function lmDraw(){
     return[Math.max(minX,Math.min(maxX,cx)),Math.max(minY,Math.min(maxY,cy)),hw,hh];
   }
 
+  const lmHidSet=hiddenPieces[lmFilmIdx]||new Set();
+  const lmDragIdx=_lmDragPiece?_lmDragPiece.idx:-1;
   placed.forEach((p,i)=>{
-    const bx1=ox+p.x*sc,by1=oy+p.y*sc;
-    const bx2=bx1+p.length*sc,by2=by1+p.width*sc;
+    if(lmHidSet.has(i))return;
+    // freePieces 반영: 드래그로 이동된 위치 우선 사용
+    const pos=_getPlacedPos(lmFilmIdx,i);if(!pos)return;
+    const px=pos.x,py=pos.y,pL=pos.l,pW=pos.w;
+    const bx1=ox+px*sc,by1=oy+py*sc;
+    const bx2=bx1+pL*sc,by2=by1+pW*sc;
     if(bx2<0||bx1>cw||by2<0||by1>ch)return;
     const isFocus=(fi!==-1&&i===fi);
+    const isDragging=(i===lmDragIdx);
     const bw=bx2-bx1,bh=by2-by1;
     const partLc=lmState.colorRotate?LM_CR_PALETTE[i%LM_CR_PALETTE.length]:lc;
 
-    // 조각 라인 (항상 원자재/그리드 위 — 겹침 시 조각 우선)
-    ctx.strokeStyle=partLc;ctx.lineWidth=isFocus?partLW2*2:partLW2;
+    // 드래그 중: 반투명 + 강조 테두리
+    if(isDragging){ctx.globalAlpha=0.72;ctx.strokeStyle="#F59F00";ctx.lineWidth=partLW2*2.5;}
+    else{ctx.globalAlpha=1;ctx.strokeStyle=partLc;ctx.lineWidth=isFocus?partLW2*2:partLW2;}
     ctx.setLineDash([]);ctx.strokeRect(bx1,by1,bw,bh);
+    ctx.globalAlpha=1;
+
+    if(isDragging)return; // 드래그 중 텍스트 스킵
 
     // 이름 — 여백 따라 한줄/두줄 자동 선택
     if(bw>24&&bh>14){
@@ -2467,31 +4218,151 @@ function lmDraw(){
         usedDimRects.push([nx,ny-nameH*0.5,nameW,nameH]);
       }
     }
-
-    // 길이 치수 — 조각 내부, 겹침 자동 회피
+    // 길이 치수
     if(bw>28){
       const fsd=Math.max(5,Math.min(lmDimFSv,Math.floor(bw/8)));
       const[cx,cy,hw,hh]=findDimPos(bx1,by1,bx2,by2,true,fsd);
       ctx.fillStyle=partLc;ctx.textAlign="center";ctx.font=`${fsd}px Courier New`;
-      ctx.fillText(String(Math.round(p.length)),cx,cy+fsd*0.35);
+      ctx.fillText(String(Math.round(pL)),cx,cy+fsd*0.35);
       usedDimRects.push([cx,cy,hw,hh]);
     }
-    // 폭 치수 — 조각 내부, 겹침 자동 회피
+    // 폭 치수
     if(bh>18){
       const fsd=Math.max(5,Math.min(lmDimFSv,Math.floor(bh/4)));
       const[cx,cy,hw,hh]=findDimPos(bx1,by1,bx2,by2,false,fsd);
       ctx.fillStyle=partLc;ctx.textAlign="center";ctx.font=`${fsd}px Courier New`;
-      ctx.fillText(String(Math.round(p.width)),cx,cy+fsd*0.35);
+      ctx.fillText(String(Math.round(pW)),cx,cy+fsd*0.35);
       usedDimRects.push([cx,cy,hw,hh]);
     }
   });
+}
+
+// Line Mode 스케일/오프셋 상태 (드래그 히트테스트용)
+let _lmScSt=null; // {ox,oy,scale}
+let _lmDragPiece=null; // {idx, startMx, startMy, origX, origY, moved}
+
+function _lmGetMxy(e){const r=lmCanvas.getBoundingClientRect();return{mx:e.clientX-r.left,my:e.clientY-r.top};}
+function _lmHitTest(mx,my){
+  if(!_lmScSt||!results.length||lmFilmIdx>=results.length)return -1;
+  const {ox,oy,scale}=_lmScSt;
+  const res=results[lmFilmIdx];
+  const hidSet=hiddenPieces[lmFilmIdx]||new Set();
+  for(let i=res.placed.length-1;i>=0;i--){
+    if(hidSet.has(i))continue;
+    const pos=_getPlacedPos(lmFilmIdx,i);if(!pos)continue;
+    const x1=ox+pos.x*scale,y1=oy+pos.y*scale;
+    const bw=pos.l*scale,bh=pos.w*scale;
+    if(mx>=x1&&mx<=x1+bw&&my>=y1&&my<=y1+bh)return i;
+  }
+  return -1;
+}
+
+function _lmInitDrag(){
+  if(!lmCanvas)return;
+  const THRESH=5;
+  let _lmCanDrag=null; // 캔버스 팬 드래그
+
+  lmCanvas.addEventListener("mousedown",e=>{
+    if(e.button!==0)return;
+    const {mx,my}=_lmGetMxy(e);
+    const hi=_lmHitTest(mx,my);
+    if(hi>=0){
+      const pos=_getPlacedPos(lmFilmIdx,hi);
+      _lmDragPiece={idx:hi,startMx:mx,startMy:my,origX:pos.x,origY:pos.y,pieceL:pos.origL,pieceW:pos.origW,moved:false};
+      e.preventDefault();
+    } else {
+      _lmCanDrag={x:e.clientX,y:e.clientY};
+    }
+  });
+  lmCanvas.addEventListener("mousemove",e=>{
+    const {mx,my}=_lmGetMxy(e);
+    if(_lmDragPiece){
+      const dx=mx-_lmDragPiece.startMx,dy=my-_lmDragPiece.startMy;
+      if(!_lmDragPiece.moved&&Math.hypot(dx,dy)<THRESH)return;
+      _lmDragPiece.moved=true;lmCanvas.style.cursor="grabbing";
+      if(!_lmScSt)return;
+      _doDragMove(lmFilmIdx,_lmDragPiece.idx,_lmScSt,_lmDragPiece.startMx,_lmDragPiece.startMy,mx,my,_lmDragPiece.origX,_lmDragPiece.origY,_lmDragPiece.pieceL,_lmDragPiece.pieceW);
+      lmDraw();
+      // 이미지/Full 연동
+      drawCV();
+      if(document.getElementById("fullMo")?.classList.contains("on")&&fF===lmFilmIdx)drawFull();
+      return;
+    }
+    if(_lmCanDrag){lmOx+=e.clientX-_lmCanDrag.x;lmOy+=e.clientY-_lmCanDrag.y;_lmCanDrag={x:e.clientX,y:e.clientY};lmDraw();return;}
+    // 커서: 조각 위 grab, 아니면 default
+    const hi=_lmHitTest(mx,my);
+    lmCanvas.style.cursor=hi>=0?"grab":"default";
+  });
+  lmCanvas.addEventListener("mouseup",e=>{
+    lmCanvas.style.cursor="default";
+    if(_lmDragPiece){
+      if(_lmDragPiece.moved){
+        _doDragEnd(lmFilmIdx,_lmDragPiece.idx,_lmDragPiece.origX,_lmDragPiece.origY);
+        drawCV();
+        if(document.getElementById("fullMo")?.classList.contains("on")&&fF===lmFilmIdx)drawFull();
+      }
+      _lmDragPiece=null;lmDraw();return;
+    }
+    _lmCanDrag=null;
+  });
+  lmCanvas.addEventListener("mouseleave",()=>{
+    if(_lmDragPiece&&_lmDragPiece.moved){
+      _doDragEnd(lmFilmIdx,_lmDragPiece.idx,_lmDragPiece.origX,_lmDragPiece.origY);
+      drawCV();
+      if(document.getElementById("fullMo")?.classList.contains("on")&&fF===lmFilmIdx)drawFull();
+    }
+    _lmDragPiece=null;_lmCanDrag=null;
+  });
+  // 터치
+  let _lmTDrag=null;
+  lmCanvas.addEventListener("touchstart",e=>{
+    if(e.touches.length===1){
+      const r=lmCanvas.getBoundingClientRect();
+      const mx=e.touches[0].clientX-r.left,my=e.touches[0].clientY-r.top;
+      const hi=_lmHitTest(mx,my);
+      if(hi>=0){
+        const pos=_getPlacedPos(lmFilmIdx,hi);
+        _lmTDrag={type:"piece",idx:hi,startMx:mx,startMy:my,origX:pos.x,origY:pos.y,pieceL:pos.origL,pieceW:pos.origW,moved:false};
+      } else {
+        _lmTDrag={type:"pan",startX:e.touches[0].clientX,startY:e.touches[0].clientY};
+      }
+    }
+  },{passive:true});
+  lmCanvas.addEventListener("touchmove",e=>{
+    e.preventDefault();
+    if(!_lmTDrag||e.touches.length!==1)return;
+    const r=lmCanvas.getBoundingClientRect();
+    const mx=e.touches[0].clientX-r.left,my=e.touches[0].clientY-r.top;
+    if(_lmTDrag.type==="piece"){
+      const dx=mx-_lmTDrag.startMx,dy=my-_lmTDrag.startMy;
+      if(!_lmTDrag.moved&&Math.hypot(dx,dy)<THRESH)return;
+      _lmTDrag.moved=true;
+      if(!_lmScSt)return;
+      _doDragMove(lmFilmIdx,_lmTDrag.idx,_lmScSt,_lmTDrag.startMx,_lmTDrag.startMy,mx,my,_lmTDrag.origX,_lmTDrag.origY,_lmTDrag.pieceL,_lmTDrag.pieceW);
+      lmDraw();drawCV();
+      if(document.getElementById("fullMo")?.classList.contains("on")&&fF===lmFilmIdx)drawFull();
+    } else {
+      lmOx+=e.touches[0].clientX-_lmTDrag.startX;lmOy+=e.touches[0].clientY-_lmTDrag.startY;
+      _lmTDrag.startX=e.touches[0].clientX;_lmTDrag.startY=e.touches[0].clientY;lmDraw();
+    }
+  },{passive:false});
+  lmCanvas.addEventListener("touchend",e=>{
+    if(_lmTDrag&&_lmTDrag.type==="piece"&&_lmTDrag.moved){
+      _doDragEnd(lmFilmIdx,_lmTDrag.idx,_lmTDrag.origX,_lmTDrag.origY);
+      drawCV();
+      if(document.getElementById("fullMo")?.classList.contains("on")&&fF===lmFilmIdx)drawFull();
+      lmDraw();
+    }
+    _lmTDrag=null;
+  },{passive:true});
 }
 
 // Line Mode 캔버스 resize
 window.addEventListener("resize",()=>{
   const mo=document.getElementById("lineMo");
   if(mo&&mo.style.display!=="none"&&lmCanvas){
-    lmCanvas.width=lmCanvas.offsetWidth;lmCanvas.height=lmCanvas.offsetHeight;lmDraw();
+    lmResizePalCanvas();
+    lmDraw();
   }
 });
 function toggleGridMode(){
@@ -2558,20 +4429,22 @@ async function openUsers(){
   await refreshUList();
 }
 
+/* 계정 관리 화면: 현재 로그인된 계정 + 입력창에 입력한 계정만 표시
+   (전체 사용자 목록 조회 API 제거 — 보안 강화) */
+let _uListCache=[]; // 이번 세션에 추가/삭제한 계정 목록 캐시
 async function refreshUList(){
   const el = document.getElementById("uList");
   if(!window._fbReady){
     el.innerHTML="<p style='font-size:12px;color:#868E96;padding:8px 0'>⏳ Firebase 연결 중... 잠시 후 다시 시도하세요.</p>";
     return;
   }
-  el.innerHTML="<p style='font-size:12px;color:#868E96;padding:4px 0'>불러오는 중...</p>";
-  const users = await window._fbGetUsers();
-  const keys = Object.keys(users);
-  if(!keys.length){
-    el.innerHTML="<p style='font-size:12px;color:#868E96;padding:4px 0'>등록된 계정이 없습니다.</p>";
+  /* 보안 정책: 전체 사용자 목록 노출 방지
+     현재 세션에서 추가/삭제한 계정만 표시합니다. */
+  if(!_uListCache.length){
+    el.innerHTML="<p style='font-size:12px;color:#868E96;padding:4px 0'>계정을 추가하면 여기에 표시됩니다.</p>";
     return;
   }
-  el.innerHTML = keys.map(u=>`
+  el.innerHTML = _uListCache.map(u=>`
     <div class="ui">
       <span style="font-size:16px">👤</span>
       <span class="uid">${esc(u)}</span>
@@ -2594,15 +4467,17 @@ async function upsertUser(){
   btn.textContent = "저장 중..."; btn.disabled = true;
 
   try{
-    const users = await window._fbGetUsers();
-    const isNew = !users[uid];
-    /* 비밀번호 SHA-256 해시 변환 */
-    users[uid] = await window._sha256(pw);
-    const ok = await window._fbSaveUsers(users);
+    /* 기존 계정 존재 여부 확인 (해당 계정만 조회) */
+    const existingHash = await window._fbGetUserHash(uid);
+    const isNew = !existingHash;
+    /* 비밀번호 SHA-256 해시 변환 후 개별 문서에 저장 */
+    const pwHash = await window._sha256(pw);
+    const ok = await window._fbUpsertUser(uid, pwHash);
     if(ok){
       toast(isNew ? `✅ '${uid}' 계정이 추가됐습니다` : `✅ '${uid}' 비밀번호가 변경됐습니다`);
       document.getElementById("nUid").value = "";
       document.getElementById("nPwd").value = "";
+      if(isNew && !_uListCache.includes(uid)) _uListCache.push(uid);
       await refreshUList();
     } else {
       toast("❌ 저장 실패 — Firebase 오류");
@@ -2616,13 +4491,14 @@ async function upsertUser(){
 }
 
 async function delUser(uid){
-  if(!confirm(`'${uid}' 계정을 삭제할까요?`)) return;
-  const users = await window._fbGetUsers();
-  if(Object.keys(users).length <= 1){ toast("⚠️ 최소 1개 계정이 필요합니다"); return; }
-  delete users[uid];
-  const ok = await window._fbSaveUsers(users);
-  if(ok){ toast(`🗑 '${uid}' 삭제됐습니다`); await refreshUList(); }
-  else toast("❌ 삭제 실패 — Firebase 오류");
+  if(uid === CU){ toast("⚠️ 현재 로그인된 계정은 삭제할 수 없습니다"); return; }
+  if(!confirm(`'${uid}' 계정을 삭제할까요?\n⚠️ 해당 계정의 클라우드 데이터도 함께 삭제됩니다.`)) return;
+  const ok = await window._fbDeleteUser(uid);
+  if(ok){
+    _uListCache = _uListCache.filter(u=>u!==uid);
+    toast(`🗑 '${uid}' 삭제됐습니다`);
+    await refreshUList();
+  } else toast("❌ 삭제 실패 — Firebase 오류");
 }
 
 /* === GitHub Gists === */
@@ -2695,9 +4571,17 @@ function loadPD(data){
   while(turnSt.length<panels.length)turnSt.push(false);
   parts=(data.parts||[]).map(ps=>ps.map(p=>({name:p.name||"",length:p.length||"",width:p.width||"",quantity:p.quantity||1,color:p.color||nc()})));
   if(!panels.length){panels=[{name:"",length:"",width:"",grain:false}];parts=[[{name:"",length:"",width:"",quantity:1,color:nc()}]];}
+  hiddenPieces=[];_freePieces={};_dragPiece=null;_fTDrag=null;_rotBtnState=null;_fRotBtnState=null;_activeDragIdx=-1;_hideRotBtn("cvRotBtn");_hideRotBtn("fRotBtn");
+  // 불러오기 후 Undo 스택 초기화 (불러온 데이터를 Undo로 되돌릴 수 없도록)
+  _undoStack=[];_redoStack=[];_lastPushedSnap="";
+  _updUndoRedoBtns();
   renderPanelTbl();document.getElementById("partsSecs").innerHTML="";
   panels.forEach((_,i)=>document.getElementById("partsSecs").appendChild(buildSec(i)));
-  schedCalc();
+  // schedCalc 대신 직접 계산 (Undo 스택 오염 방지)
+  clearTimeout(calcT);
+  calcLayout();
+  // 불러오기 완료 후 현재 상태를 lastPushedSnap에 동기화
+  _lastPushedSnap=_snapState();
 }
 /* === 저장 상태 표시 === */
 let _autoSaveTimer=null;
@@ -2795,30 +4679,26 @@ async function fbSave(){
 async function fbLoad(){
   if(!window._fbReady){toast("Firebase 연결 중...");return;}
   if(!confirm("클라우드에서 불러오면 현재 내용이 교체됩니다. 계속할까요?"))return;
-  toast("☁️ 불러오는 중...");const res=await window._fbLoad();
+  toast("☁️ 불러오는 중...");const res=await window._fbLoad(CU);
   if(res.ok){loadPD(res.data);const w=res.savedAt?new Date(res.savedAt).toLocaleString("ko-KR"):"";toast("☁️ 완료"+(res.savedBy?" ("+res.savedBy+")":" ")+" "+w);}
   else toast("❌ "+(res.error||"저장된 데이터 없음"));
 }
 async function fbBackups(){
   if(!window._fbReady){toast("Firebase 연결 중...");return;}
-  const list=await window._fbListBackups();if(!list.length){toast("저장된 백업이 없습니다");return;}
+  const list=await window._fbListBackups(CU);if(!list.length){toast("저장된 백업이 없습니다");return;}
   document.getElementById("bkList").innerHTML=list.map(b=>{const w=b.savedAt?new Date(b.savedAt).toLocaleString("ko-KR"):b.id;return`<div class="bki" onclick="fbRestore('${b.id}')"><span class="bkw">${w}</span><span class="bkb">${esc(b.savedBy||"-")}</span><span style="color:var(--ac);font-size:12px">복원 ▶</span></div>`;}).join("");
   document.getElementById("backupMo").classList.add("on");
 }
 async function fbRestore(id){
   if(!confirm("이 백업으로 복원할까요?"))return;
-  const res=await window._fbLoadBackup(id);
+  const res=await window._fbLoadBackup(id,CU);
   if(res.ok){loadPD(res.data);document.getElementById("backupMo").classList.remove("on");toast("☁️ 복원 완료");}
   else toast("❌ 복원 실패");
 }
 async function autoLoad(){
-  // Firebase 준비 대기 (최대 10초) — 첫 실행 시 CDN 로딩 지연 대응
-  let fw=0;
-  while(!window._fbReady && fw<100){ await new Promise(r=>setTimeout(r,100)); fw++; }
-  if(!window._fbReady){ toast("⚠️ 저장소 연결 실패. 새로고침 하세요."); return; }
-
   // Gist 토큰/ID 복원 — localStorage 먼저 시도
   try{window._gist_token=localStorage.getItem("cut_gist_token")||"";window._gist_id=localStorage.getItem("cut_gist_id")||"";}catch(e){window._gist_token="";window._gist_id="";}
+  if(!window._fbReady)return;
   // localStorage에서 토큰을 못 가져온 경우 Firebase에서 복원
   if(!window._gist_token&&typeof CU!=="undefined"&&CU){
     const gd=await window._fbLoadGist(CU);
@@ -2828,11 +4708,11 @@ async function autoLoad(){
     }
   }
   if(panels.some(p=>p.length||p.width))return;
-  const res=await window._fbLoad();if(!res.ok)return;loadPD(res.data);
+  const res=await window._fbLoad(CU);if(!res.ok)return;loadPD(res.data);
   const w=res.savedAt?new Date(res.savedAt).toLocaleString("ko-KR"):"";toast("☁️ 복원"+(res.savedBy?" ("+res.savedBy+")":" ")+" "+w);
-  // 토큰 복원 후 Gist 저장 1회 실행 — Gist API가 Firebase보다 느리므로 3초 여유
+  // 토큰 복원 후 Gist 저장 1회 실행 — 재실행 후 상태표시줄 동기화
   if(window._gist_token){
-    setTimeout(()=>{gistSaveAuto(getPD(),true);},3000);
+    setTimeout(()=>{gistSaveAuto(getPD(),true);},1500);
   }
 }
 
@@ -2879,11 +4759,22 @@ function exportExcel(){
 /* === 초기화 === */
 function resetAll(){
   if(!confirm("모든 입력을 초기화할까요?"))return;
-  cidx=0;panels=[{name:"",length:"",width:"",grain:false}];parts=[[{name:"",length:"",width:"",quantity:1,color:nc()}]];
-  document.getElementById("siteName").value="";results=[];curFilm=0;
-  renderPanelTbl();document.getElementById("partsSecs").innerHTML="";
+  // 모든 상태 완전 초기화
+  cidx=0;
+  panels=[{name:"",length:"",width:"",grain:false}];
+  parts=[[{name:"",length:"",width:"",quantity:1,color:nc()}]];
+  flipX=[false];flipY=[false];turnSt=[false];
+  results=[];curFilm=0;
+  hiddenPieces=[];_freePieces={};_dragPiece=null;_fTDrag=null;_rotBtnState=null;_fRotBtnState=null;_activeDragIdx=-1;_hideRotBtn("cvRotBtn");_hideRotBtn("fRotBtn");
+  _undoStack=[];_redoStack=[];_lastPushedSnap="";
+  _updUndoRedoBtns();
+  clearTimeout(calcT);
+  document.getElementById("siteName").value="";
+  renderPanelTbl();
+  document.getElementById("partsSecs").innerHTML="";
   document.getElementById("partsSecs").appendChild(buildSec(0));
-  drawCV();updIB();toast("🔄 초기화 완료");
+  drawCV();updIB();
+  toast("🔄 초기화 완료");
 }
 
 /* === 리사이저 === */
@@ -2922,5 +4813,17 @@ if('serviceWorker' in navigator){
   });
 }
 </script>
+
+<!-- 요약 팝업 모달 -->
+<div class="mo" id="sumMo" style="z-index:9000">
+<div class="mc" style="max-width:340px">
+  <div class="mct">📋 배치 요약
+    <button id="btnSumRefresh" onclick="manualRefreshSum()" title="갱신">↻</button>
+    <button class="mcl" onclick="cmo('sumMo')">✕</button>
+  </div>
+  <div id="sumC"></div>
+  <div class="mbs"><button class="mb_ s" onclick="cmo('sumMo')">닫기</button></div>
+</div></div>
+
 </body>
 </html>
